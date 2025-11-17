@@ -11,9 +11,12 @@ using namespace parser;
 // @brief The entry point of the application.
 std::int32_t main( )
 {
-    std::println( "{} {} on {}",
+    std::println( "{} {} ({} {} on {}) {}",
         constants::APP_NAME,
         constants::APP_VERSION,
+        constants::APP_COMMIT,
+        constants::COMPILER_INFO,
+        constants::BUILD_ARCH,
         system_util::get_system_platform(  )
     );
 

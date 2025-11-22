@@ -19,6 +19,10 @@ private:
     std::vector< std::uint32_t > bytecode;
     std::uint8_t nx_register { 0 }; /// The next register to be allocated.
 
+    std::unordered_map< std::string_view, jnvm::inst::VMNative > native_map {
+        { "print", jnvm::inst::VMNative::PRINT }
+    };
+
     ///@brief Emits the instruction into it's underlying integer value.
     void emit( const jnvm::inst::Instruction& inst );
 

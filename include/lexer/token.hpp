@@ -21,6 +21,8 @@ namespace token
         ASTERISK,
         SLASH,
         EQUALS,
+        COMMA,
+        PRINT,
         LET,
         END_OF_FILE
     };

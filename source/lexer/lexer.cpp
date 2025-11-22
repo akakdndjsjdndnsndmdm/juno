@@ -24,6 +24,25 @@ std::vector<token::Token> lexer::Lexer::tokenize()
             );
 
             advance(  );
+        } else if ( std::isalpha( current ) ) /// Process multiple alphabetical characters as an identifier or keyword.
+        {
+            const std::size_t start { pos };
+            std::size_t start_col { col };
+            while ( pos < source.size( ) && std::isalpha( source.at( pos ) )) advance(  );
+
+            const std::string value { source.substr( start, pos ) };
+            token::TokenType token_type { token::IDENTIFIER };
+            if ( token_keywords_map.contains( value ) )
+            {
+                token_type = token_keywords_map.at( value );
+            }
+
+            tokens.emplace_back(
+                token_type,
+                value,
+                line,
+                start_col
+            );
         } else if ( std::isdigit( current ) ) /// Process multiple numerical characters as a digit
         {
             const std::size_t start { pos };
@@ -32,10 +51,10 @@ std::vector<token::Token> lexer::Lexer::tokenize()
 
             while (pos < source.size(  ))
             {
-                if (std::isdigit( source[ pos ] ))
+                if (std::isdigit( source.at( pos ) ))
                 {
                     advance(  );
-                } else if ( source[ pos ] == '.' && !is_float && std::isdigit( *peek_ahead(  ) ) )
+                } else if ( source.at( pos )== '.' && !is_float && std::isdigit( *peek_ahead(  ) ) )
                 {
                     is_float = true;
                     advance(  );

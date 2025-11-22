@@ -2,7 +2,11 @@
 
 #include <memory>
 #include <stdexcept>
+#include <utility>
+#include <vector>
 
+class IdentifierLit;
+class CallExpression;
 class BinaryExpression;
 class Number;
 
@@ -16,6 +20,8 @@ public:
     virtual ~Visitor() = default;
     virtual void visit( const Number& n ) = 0;
     virtual void visit( const BinaryExpression& b ) = 0;
+    virtual void visit( const CallExpression& c ) = 0;
+    virtual void visit( const IdentifierLit& c ) = 0;
 };
 
 class Expression
@@ -30,7 +36,9 @@ public:
     enum ExpressionType
     {
         Number,
-        BinaryExpr
+        BinaryExpr,
+        CallExpr,
+        Identifier,
     };
 
     explicit Expression( const ExpressionType type)
@@ -71,6 +79,28 @@ public:
     }
 private:
     std::unique_ptr< Expression > m_expression { nullptr };
+};
+
+class IdentifierLit final : public Expression
+{
+public:
+    explicit IdentifierLit( std::string_view value )
+        : Expression { ExpressionType::Identifier },
+          m_value { value }
+    { }
+
+    void accept(Visitor &v) const override
+    {
+        v.visit( *this );
+    }
+
+    [[nodiscard]]
+    const std::string& get_value( ) const
+    {
+        return m_value;
+    }
+private:
+    std::string m_value;
 };
 
 class Number final : public Expression
@@ -160,6 +190,41 @@ struct BinaryOp
             default: throw std::runtime_error( "[juno::ast_error] unknown operation type in BinaryOp" );
         }
     }
+};
+
+class CallExpression final : public Expression
+{
+public:
+    explicit CallExpression(
+        std::string callee,
+        std::vector< std::unique_ptr< Expression > > args
+    ) :
+      Expression(CallExpr),
+      m_callee { std::move(callee) },
+      m_args { std::move(args) }
+    {
+    }
+
+    [[nodiscard]]
+    const std::string& get_callee() const
+    {
+        return m_callee;
+    }
+
+    [[nodiscard]]
+    const std::vector< std::unique_ptr< Expression > >& get_args() const
+    {
+        return m_args;
+    }
+
+    void accept(Visitor &v) const override
+    {
+        v.visit( *this );
+    }
+
+private:
+    std::string m_callee;
+    std::vector< std::unique_ptr< Expression > > m_args {};
 };
 
 class BinaryExpression final : public Expression

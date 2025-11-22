@@ -5,6 +5,7 @@
 #include "jnvm/machine.hpp"
 #include "lexer/lexer.hpp"
 #include "parser/parser.hpp"
+#include "tester/tester.hpp"
 
 #include <print>
 
@@ -24,10 +25,12 @@ std::int32_t main( )
         system_util::get_system_platform(  )
     );
 
-    constexpr std::string_view test_source = "1 + 1";
+    constexpr std::string_view test_source = "print(1, 2, 3, 4, 5)";
 
     Lexer lexer { test_source };
+    std::println("created lexer");
     Parser parser { lexer.tokenize(  ) };
+    std::println("tokenized and created parser");
     Compiler compiler { parser.parse(  ) };
     Machine machine;
 

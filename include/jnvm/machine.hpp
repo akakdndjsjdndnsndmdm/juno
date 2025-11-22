@@ -171,7 +171,7 @@ namespace jnvm::machine
                     {
                         for ( auto idx { base_reg }; idx < base_reg + arg_count; ++idx )
                         {
-                            std::print("{}", this->registers[ idx ]);
+                            std::print("{} ", this->registers[ idx ]);
                         }
 
                         std::println("");

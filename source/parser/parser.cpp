@@ -54,6 +54,8 @@ std::unique_ptr< Expression > parser::Parser::parse_precedence( const int min_pr
 
 std::unique_ptr< Expression > parser::Parser::parse_prim( )
 {
+    // std::println("parsing primary with value = {}", m_current.value);
+
     switch ( m_current.token_type )
     {
         case token::NUMBER:
@@ -65,8 +67,69 @@ std::unique_ptr< Expression > parser::Parser::parse_prim( )
             return expr;
         }
 
+        case token::IDENTIFIER:
+        {
+            auto value { m_current.value };
+            auto expr { std::make_unique< IdentifierLit >( value ) };
+            eat(  );
+
+            return expr;
+        }
+
+        case token::PRINT:
+        {
+            // std::println("PARSED PRINT");
+
+            auto value { m_current.value };
+            eat(  );
+
+            if ( m_current.token_type == token::LPAREN )
+            {
+                eat(  );
+                // std::println("about to parse args");
+                auto args { parse_args( ) };
+                // std::println("parsed args");
+                auto expr { std::make_unique<CallExpression>( value, std::move( args ) ) };
+
+                // std::println("Parsed print and created call expression");
+
+                eat(  );
+
+                return expr;
+            }
+
+            auto expr { std::make_unique< IdentifierLit >( value ) };
+            return expr;
+        }
+
         default: throw std::runtime_error( "unhandled expression type" );
     }
+}
+
+std::vector< std::unique_ptr< Expression > > parser::Parser::parse_args( )
+{
+    std::vector< std::unique_ptr< Expression > > args { };
+
+    std::size_t _count { 0 };
+
+    while ( m_current.token_type != token::RPAREN )
+    {
+        _count++;
+
+        std::println("Parsed {} arg", _count);
+
+        std::unique_ptr expr { parse_expr(  ) };
+        args.push_back( std::move( expr ) );
+
+        if ( m_current.token_type != token::RPAREN )
+        {
+            expect( token::COMMA, "Expected ',' after argument." );
+        }
+    }
+
+    std::println("SIZE OF ARGS = {}", args.size(  ));
+
+    return args;
 }
 
 std::unique_ptr< Statement > parser::Parser::parse_stmt( )

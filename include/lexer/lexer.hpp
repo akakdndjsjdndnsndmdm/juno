@@ -22,6 +22,7 @@ namespace lexer
         { '-', token::TokenType::MINUS },
         { '/', token::TokenType::SLASH },
         { '=', token::TokenType::EQUALS },
+        { ',', token::TokenType::COMMA },
     };
 
     const std::unordered_map<
@@ -29,7 +30,8 @@ namespace lexer
         token::TokenType
     > token_keywords_map
     {
-        { "let", token::TokenType::LET }
+        { "let", token::TokenType::LET },
+        { "print", token::TokenType::PRINT },
     };
 
     class Lexer

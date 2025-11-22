@@ -29,6 +29,8 @@ namespace parser
         std::unique_ptr< Expression > parse_precedence( int min_precedence );
         ///@brief Parse a primary expression.
         std::unique_ptr< Expression > parse_prim();
+        ///@brief Parse a list of arguments.
+        std::vector< std::unique_ptr< Expression > > parse_args();
 
         std::size_t m_position { 0 };
 

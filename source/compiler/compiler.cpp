@@ -53,6 +53,8 @@ std::uint8_t Compiler::comp_expression( const Expression *expr )
             static_cast< std::uint8_t >( n->get_value(  ) )
         ) );
 
+        std::println("Number reg = {}", reg);
+
         return reg;
     }
 
@@ -85,6 +87,31 @@ std::uint8_t Compiler::comp_expression( const Expression *expr )
         ) );
 
         return result_register;
+    }
+
+    /// If the expression is a CallExpression, emit it's structure to the bytecode.
+    /// For now, we'll directly call natives
+    if ( const auto* call { dynamic_cast< const CallExpression* >( expr ) })
+    {
+        const auto& args { call->get_args(  ) };
+        const auto& callee { call->get_callee(  ) };
+
+        const auto first_reg { comp_expression( args[ 0 ].get( ) ) };
+        const auto arg_count { args.size(  ) };
+
+        /// 22/11/2025 - I subtracted 1 from arg_count because I wanted to exclude the first arg
+        ///              now it has been removed and now the args are compiled.
+        for ( int idx { 1 }; idx < arg_count; idx++ )
+            comp_expression( args[ idx ].get( ) );
+
+        emit(jnvm::inst::Instruction(
+            jnvm::inst::Opcode::CALL,
+            static_cast< std::uint8_t >( native_map[ callee ] ),
+            first_reg,
+            arg_count
+        ));
+
+        return first_reg;
     }
 
     throw std::runtime_error( "[juno::compile_error] unknown expression type." );

@@ -24,6 +24,8 @@ namespace token
         SLASH,
         EQUALS,
         COMMA,
+        COLON,
+        BUILTIN,
         PRINT,
         SEMI,
         LET,

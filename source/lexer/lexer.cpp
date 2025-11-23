@@ -24,10 +24,12 @@ std::vector<token::Token> lexer::Lexer::tokenize()
             );
 
             advance(  );
-        } else if ( std::isalpha( current ) ) /// Process multiple alphabetical characters as an identifier or keyword.
+        } else if ( std::isalpha( current ) || current == '@' ) /// Process multiple alphabetical characters as an identifier or keyword.
         {
             const std::size_t start { pos };
             std::size_t start_col { col };
+            if (current == '@') advance(  );
+
             while ( pos < source.size( ) && std::isalpha( source.at( pos ) )) advance(  );
 
             const std::string value { source.substr( start, pos - start ) };
@@ -36,6 +38,8 @@ std::vector<token::Token> lexer::Lexer::tokenize()
             {
                 token_type = token_keywords_map.at( value );
             }
+
+            std::println("VALUE={}", value);
 
             tokens.emplace_back(
                 token_type,

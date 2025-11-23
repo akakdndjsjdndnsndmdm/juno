@@ -27,24 +27,20 @@ std::int32_t main( )
             system_util::get_system_platform(  )
         );
 
-        constexpr std::string_view test_source = "let x = 5; print(x);";
+        constexpr std::string_view test_source = "@profile { let x = 234 * 34562; let y = x / 23; print(y); }";
 
         Lexer lexer { test_source };
-        std::println( "created lexer" );
         auto tokens { lexer.tokenize( ) };
         Parser parser { tokens };
-        std::println( "tokenized and created parser" );
         Compiler compiler { parser.parse( ) };
         Machine  machine;
 
         auto bytecode { compiler.compile( ) };
 
-        std::println( "bytecode: {}", bytecode );
+        // std::println( "bytecode: {}", bytecode );
 
         machine.load( bytecode );
-        auto result { machine.execute( ) };
-        std::println( "Machine Result (returns first reg, register 3 holds the value): {}", result );
-
+        machine.execute( );
     }
     catch ( const std::exception& err )
     {

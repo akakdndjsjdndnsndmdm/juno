@@ -129,17 +129,38 @@ std::unique_ptr< Statement > parser::Parser::parse_stmt( )
     if (m_current.token_type == token::LET)
     {
         eat(  );
+
         auto name { expect( token::IDENTIFIER, "Expected a variable name after 'let'." ) };
+
+        std::optional< std::string > type_name { std::nullopt };
+        if ( m_current.token_type == token::COLON )
+        {
+            eat(  );
+
+            type_name = expect( token::IDENTIFIER, "Expected a type name after ':' in variable declaration." );
+        }
+
+        std::unique_ptr< Type > type { nullptr };
+        if ( type_name.has_value(  ) )
+        {
+            type = std::make_unique< Type >( TypeKind::Simple, type_name.value(  ), std::nullopt );
+        }
+
         expect( token::EQUALS, "Expected '=' after variable name." );
+
         auto value { parse_expr(  ) };
+
         expect( token::SEMI, "Expected ';' after variable declaration statement." );
-        return std::make_unique< VariableDeclaration >( std::move( name ) , std::move( value ) );
+
+        return std::make_unique< VariableDeclaration >( std::move( name ) , std::move( value ), std::move( type ) );
     }
 
-    if ( m_current.token_type == token::LBRACE )
+    std::println("::parse_stmt() current value = {}", m_current.value);
+
+    if ( m_current.token_type == token::LBRACE || m_current.token_type == token::BUILTIN )
     {
-        eat(  );
-        auto block { parse_body(  ) };
+        // eat(  );
+        auto block { parse_block(  ) };
         expect( token::RBRACE, "Expected '}' to close code block." );
         return block;
     }
@@ -151,8 +172,23 @@ std::unique_ptr< Statement > parser::Parser::parse_stmt( )
     return expr_stmt;
 }
 
-std::unique_ptr< Statement > parser::Parser::parse_body( )
+std::unique_ptr< Statement > parser::Parser::parse_block( )
 {
+    bool is_profiled { false };
+    if ( m_current.token_type == token::BUILTIN )
+    {
+        if ( m_current.value == "@profile" )
+        {
+            is_profiled = true;
+            eat(  );
+        } else
+        {
+            throw std::runtime_error( std::format( "[juno::parse_error] Blocks can only be prefixed with @profile, not '{}'", m_current.value ) );
+        }
+    }
+
+    eat(  );
+
     std::vector< std::unique_ptr< Statement > > stmts { };
 
     while ( m_current.token_type != token::RBRACE )
@@ -161,7 +197,7 @@ std::unique_ptr< Statement > parser::Parser::parse_body( )
         stmts.push_back( std::move( stmt ) );
     }
 
-    return std::make_unique< BlockStmt >( std::move( stmts ) );
+    return std::make_unique< BlockStmt >( std::move( stmts ), is_profiled );
 }
 
 void parser::Parser::eat( )

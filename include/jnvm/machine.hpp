@@ -2,6 +2,7 @@
 #include "instruction.hpp"
 
 #include <array>
+#include <chrono>
 #include <cstdint>
 #include <format>
 #include <functional>
@@ -119,16 +120,23 @@ namespace jnvm::machine
                         break;
                     }
 
-                    case Opcode::DBG:
-                    {
-                        const auto reg { inst.op1(  ) };
-                        std::println( "[reg@{},pc@{}] {}", reg, pc, registers[ reg ] );
-                        break;
-                    }
-
                     case Opcode::HLT:
                     {
                         /// Terminate the machine and return the first register.
+                        break;
+                    }
+
+                    case Opcode::PRF:
+                    {
+                        profiler_start_time = std::chrono::steady_clock::now(  );
+                        break;
+                    }
+
+                    case Opcode::PRFE:
+                    {
+                        auto end { std::chrono::steady_clock::now(  ) };
+                        auto dur { std::chrono::duration_cast< std::chrono::microseconds >( end - profiler_start_time ) };
+                        std::println( "Block took {}, processed {} instructions.", dur, pc+1 );
                         break;
                     }
 
@@ -162,6 +170,8 @@ namespace jnvm::machine
         std::array< std::uint32_t, REGISTER_COUNT > registers { };
         std::vector< std::uint32_t > bytecode { };
         std::size_t pc { 0 };
+
+        std::chrono::steady_clock::time_point profiler_start_time;
 
         std::unordered_map< VMNative, std::function< void( std::uint8_t base_reg, std::size_t arg_count ) > > natives {
             /// print

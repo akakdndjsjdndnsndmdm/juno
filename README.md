@@ -32,6 +32,20 @@ let z = 20;
 
 Juno has a global scope like the large majority of programming languages, each scope in Juno has a predefined start register for any variables declared in that scope. When the compiler leaves the scope, the compiler which take note of the exiting of the scope and overwrite these registers as they're no longer in use. This is one way Juno cleans up variables.
 
+```
+@profile {
+    let x = 234 * 34562;
+    let y = x / 23;
+    print(y);
+}
+```
+```
+20
+Block took 122us, processed 8 instructions.
+```
+
+Juno has special keywords and functions prefixed with `@`, for example the `@profile` can prefix a block of code or a functions body, it will the automatically print the time it took to execute the block of code, and how many instructions were executed. This is useful for optimizing your programs and measuring different approaches to a solution.
+
 # Roadmap
 * [x] Bytecode VM
 * [x] Variables and expressions

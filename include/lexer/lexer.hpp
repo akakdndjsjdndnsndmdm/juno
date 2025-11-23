@@ -26,6 +26,7 @@ namespace lexer
         { '=', token::TokenType::EQUALS },
         { ',', token::TokenType::COMMA },
         { ';', token::TokenType::SEMI },
+        { ':', token::TokenType::COLON },
     };
 
     const std::unordered_map<
@@ -35,6 +36,7 @@ namespace lexer
     {
         { "let", token::TokenType::LET },
         { "print", token::TokenType::PRINT },
+        { "@profile", token::TokenType::BUILTIN },
     };
 
     class Lexer

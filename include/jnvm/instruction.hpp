@@ -22,6 +22,8 @@ namespace jnvm::inst
         JMP,    /// Unconditional jump
         JNZ,    /// Jump if not zero
         CALL,   /// Call a function or native function
+        PRF,    /// Start profiling
+        PRFE,   /// End profiling
         DBG     /// A DEBUG INSTRUCTION
     };
 
@@ -46,6 +48,8 @@ namespace jnvm::inst
             { Opcode::JMP, "JMP" },
             { Opcode::JNZ, "JNZ" },
             { Opcode::DBG, "DBG" },
+            { Opcode::PRF, "PRF" },
+            { Opcode::PRFE, "PFRE" },
         };
 
         return opcode_To_string.contains( opcode ) ? opcode_To_string[ opcode ] : "?";

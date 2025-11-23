@@ -60,10 +60,12 @@ void Compiler::comp_statement( const Statement &stmt )
         scopes.back(  ).variables[ var_stmt->get_name(  ) ] = var_reg;
     } else if ( const auto *block_stmt { dynamic_cast< const BlockStmt * >( &stmt ) } )
     {
+        if ( block_stmt->is_profiled(  ) ) emit( jnvm::inst::Instruction( jnvm::inst::Opcode::PRF ) );
         enter_scope(  );
         for ( const auto& s : block_stmt->get_body( ) )
             comp_statement( *s );
         exit_scope(  );
+        if ( block_stmt->is_profiled(  ) ) emit( jnvm::inst::Instruction( jnvm::inst::Opcode::PRFE ) );
     } else
     {
         throw std::runtime_error("[juno::compile_error] unknown statement type.");

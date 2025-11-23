@@ -4,6 +4,7 @@
 
 #include <memory>
 #include <optional>
+#include <unordered_map>
 #include <vector>
 
 namespace parser
@@ -23,8 +24,8 @@ namespace parser
 
         ///@brief Parse a statement.
         std::unique_ptr< Statement > parse_stmt();
-        ///@brief Parse a collection of statements into a body.
-        std::unique_ptr< Statement > parse_body();
+        ///@brief Parse a collection of statements into a block.
+        std::unique_ptr< Statement > parse_block();
         ///@brief Parse an expression.
         std::unique_ptr< Expression > parse_expr();
         ///@brief Parse a precedence level.

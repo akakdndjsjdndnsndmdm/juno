@@ -1,6 +1,7 @@
 #pragma once
 
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <utility>
 #include <vector>
@@ -84,9 +85,14 @@ private:
 class BlockStmt final : public Statement
 {
 public:
-    explicit BlockStmt( std::vector< std::unique_ptr< Statement > > body )
-        : m_body { std::move( body ) }
+    explicit BlockStmt( std::vector< std::unique_ptr< Statement > > body, const bool profiled )
+        : m_profiled { profiled }, m_body { std::move( body ) }
     { }
+
+    [[nodiscard]] bool is_profiled( ) const
+    {
+        return m_profiled;
+    }
 
     [[nodiscard]]
     std::vector< std::unique_ptr< Statement > >& get_body( )
@@ -101,20 +107,44 @@ public:
     }
 
 private:
+    ///@brief If the user prefixes a code block with @profile, this block will be profiled.
+    bool m_profiled { false };
     std::vector< std::unique_ptr< Statement > > m_body { };
+};
+
+enum class TypeKind
+{
+    Simple,     /// int, string
+    Generic,    /// List<T>
+    Function,   /// (int) -> int
+    Array,      /// int[]
+    Optional,   /// int?
+};
+
+struct Type
+{
+    TypeKind kind;          /// Kind of the type of the type, what?
+    std::string name;       /// The name of the type e.g int
+    std::optional< std::vector< std::unique_ptr< Type > > > generic_type_args;   /// Types inside generics e.g Something<A, B, C>
 };
 
 class VariableDeclaration final : public Statement
 {
 public:
-    explicit VariableDeclaration( std::string name, std::unique_ptr< Expression > value )
-        : m_name { std::move( name ) }, m_value { std::move( value ) }
+    explicit VariableDeclaration( std::string name, std::unique_ptr< Expression > value, std::unique_ptr< Type > type )
+        : m_name { std::move( name ) }, m_type { std::move( type ) }, m_value { std::move( value ) }
     {}
 
     [[nodiscard]]
     const std::unique_ptr< Expression > &get_value( ) const
     {
         return m_value;
+    }
+
+    [[nodiscard]]
+    const std::unique_ptr< Type > &get_type( ) const
+    {
+        return m_type;
     }
 
     [[nodiscard]]
@@ -125,6 +155,7 @@ public:
 
 private:
     std::string m_name;
+    std::unique_ptr< Type > m_type { nullptr };
     std::unique_ptr< Expression > m_value { nullptr };
 };
 
@@ -132,7 +163,7 @@ class IdentifierLit final : public Expression
 {
 public:
     explicit IdentifierLit( std::string_view value )
-        : Expression { ExpressionType::Identifier },
+        : Expression { Identifier }, /// 23/11/2025 - removed redundant qualifier
           m_value { value }
     { }
 

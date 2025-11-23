@@ -76,7 +76,6 @@ std::uint8_t Compiler::comp_expression( const Expression *expr )
     /// And allocate it to a register.
     if ( const auto* n { dynamic_cast< const Number* >( expr ) } )
     {
-        std::println("COMPILING NUMBER");
         const auto reg { nx_register++ };
 
         emit( jnvm::inst::Instruction(

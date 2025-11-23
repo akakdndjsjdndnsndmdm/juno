@@ -13,7 +13,7 @@ using namespace lexer;
 using namespace parser;
 using namespace jnvm::machine;
 
-// @brief The entry point of the application.
+///@brief The entry point of the application.
 std::int32_t main( )
 {
     try

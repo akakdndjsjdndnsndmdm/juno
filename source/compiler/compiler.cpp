@@ -66,6 +66,9 @@ void Compiler::comp_statement( const Statement &stmt )
             comp_statement( *s );
         exit_scope(  );
         if ( block_stmt->is_profiled(  ) ) emit( jnvm::inst::Instruction( jnvm::inst::Opcode::PRFE ) );
+    } else if ( const auto *proto { dynamic_cast< const FunctionPrototype * >( &stmt ) } )
+    {
+        std::println("PROTOTYPE NAME = {}", proto->get_name(  ));
     } else
     {
         throw std::runtime_error("[juno::compile_error] unknown statement type.");

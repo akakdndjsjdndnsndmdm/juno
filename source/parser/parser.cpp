@@ -54,122 +54,198 @@ std::unique_ptr< Expression > parser::Parser::parse_precedence( const int min_pr
 
 std::unique_ptr< Expression > parser::Parser::parse_prim( )
 {
-    std::println("parsing primary with value = {}", m_current.value);
-
     switch ( m_current.token_type )
     {
-        case token::NUMBER:
-        {
-            auto value { std::stod( m_current.value ) };
-            auto expr { std::make_unique<Number>( value ) };
-            eat(  );
-
-            return expr;
-        }
-
-        case token::IDENTIFIER:
-        {
-            auto value { m_current.value };
-            auto expr { std::make_unique< IdentifierLit >( value ) };
-            eat(  );
-
-            return expr;
-        }
-
+        case token::NUMBER: return parse_number();
         case token::PRINT:
+        case token::IDENTIFIER:
+            return parse_identifier();
+        case token::LPAREN: return parse_group(  );
+        case token::FN:
         {
-            // std::println("PARSED PRINT");
+            auto lambda { parse_lambda() };
+            auto* proto_r { dynamic_cast< FunctionPrototype * >( lambda.get(  ) ) };
+            if ( !proto_r ) throw std::runtime_error( "[juno::parse_error] Failed to parse lambda expression." );
 
-            auto value { m_current.value };
-            eat(  );
+            lambda.release( );
 
-            if ( m_current.token_type == token::LPAREN )
-            {
-                eat(  );
-                // std::println("about to parse args");
-                auto args { parse_args( ) };
-                // std::println("parsed args");
-                auto expr { std::make_unique<CallExpression>( value, std::move( args ) ) };
-
-                // std::println("Parsed print and created call expression");
-
-                eat(  );
-
-                return expr;
-            }
-
-            auto expr { std::make_unique< IdentifierLit >( value ) };
-            return expr;
+            return std::make_unique< FunctionExpression >( std::unique_ptr< FunctionPrototype >( proto_r ) );
         }
-
-        default: throw std::runtime_error( "unhandled expression type" );
+        default: throw std::runtime_error(
+                std::format( "[juno::parse_error] Unexpected token '{}' in expression",
+                    m_current.value )
+            );
     }
+}
+
+std::unique_ptr< Expression > parser::Parser::parse_number( )
+{
+    const double value { std::stod( m_current.value ) };
+    eat(  );
+
+    return std::make_unique< Number >( value );
+}
+
+std::unique_ptr< Expression > parser::Parser::parse_identifier( )
+{
+    const std::string value { m_current.value };
+    eat(  );
+
+    /// Check if the current token is a left parenthesis
+    /// If it is, then it's a function call.
+    if ( match( token::LPAREN ) )
+    {
+        auto args { parse_args(  ) };
+        expect( token::RPAREN, "Expected ')' after function arguments." );
+
+        return std::make_unique< CallExpression >( value, std::move( args ) );
+    }
+
+    return std::make_unique< IdentifierLit >( value );
+}
+
+std::unique_ptr< Expression > parser::Parser::parse_group( )
+{
+    eat(  );
+    auto expr { parse_expr(  ) };
+    expect( token::RPAREN, "Expected ')' after grouped expression." );
+
+    return expr;
 }
 
 std::vector< std::unique_ptr< Expression > > parser::Parser::parse_args( )
 {
     std::vector< std::unique_ptr< Expression > > args { };
 
-    while ( m_current.token_type != token::RPAREN )
-    {
-        std::unique_ptr expr { parse_expr(  ) };
-        args.push_back( std::move( expr ) );
+    /// I did not handle empty args before, but now I have.
+    if ( check( token::RPAREN ) ) return args;
 
-        if ( m_current.token_type != token::RPAREN )
-        {
-            expect( token::COMMA, "Expected ',' after argument." );
-        }
-    }
+    /// Parse the first argument, then the remaining.
+    args.push_back( parse_expr(  ) );
+    while ( match( token::COMMA ) ) args.push_back( parse_expr(  ) );
 
     return args;
 }
 
 std::unique_ptr< Statement > parser::Parser::parse_stmt( )
 {
-    if (m_current.token_type == token::LET)
+    switch ( m_current.token_type )
     {
-        eat(  );
+        case token::LET: return parse_var_decl(  );
+        case token::LBRACE:
+        case token::BUILTIN: return parse_block(  );
+        case token::FN: return parse_prototype(  );
+        default: return parse_expr_stmt(  );
+    }
+}
 
-        auto name { expect( token::IDENTIFIER, "Expected a variable name after 'let'." ) };
+std::unique_ptr< Statement > parser::Parser::parse_prototype( )
+{
+    expect( token::FN, "Expected 'fn' keyword." );
+    auto name { expect( token::IDENTIFIER, "Expected function name after 'fn'." ) };
+    expect( token::LPAREN, "Expected '(' after 'fn'"  );
+    auto params { parse_params(  ) };
+    expect( token::RPAREN, "Expected ')' after parameters." );
+    expect( token::ARROW, "Expected '->' after enclosed parameters." );
+    auto ret_type_name { expect( token::IDENTIFIER, "Expected return type after '->' in function prototype." ) };
+    auto ret_type { std::make_unique< Type >( TypeKind::Simple, ret_type_name, std::nullopt ) };
 
-        std::optional< std::string > type_name { std::nullopt };
-        if ( m_current.token_type == token::COLON )
-        {
-            eat(  );
+    /// Parse the function prototype body.
+    auto body { parse_block(  ) };
+    auto block_stmt { std::unique_ptr< BlockStmt >( dynamic_cast< BlockStmt * >( body.release(  ) ) ) };
+    /// Ensure the block exists
+    if ( !block_stmt ) throw std::runtime_error( "[juno::parse_error] Expected block statement for function body." );
 
-            type_name = expect( token::IDENTIFIER, "Expected a type name after ':' in variable declaration." );
-        }
+    return std::make_unique< FunctionPrototype >(
+        name,
+        std::move( params ),
+        std::move( ret_type ),
+        std::move( block_stmt )
+    );
+}
 
-        std::unique_ptr< Type > type { nullptr };
-        if ( type_name.has_value(  ) )
-        {
-            type = std::make_unique< Type >( TypeKind::Simple, type_name.value(  ), std::nullopt );
-        }
+std::unique_ptr< Statement > parser::Parser::parse_lambda( )
+{
+    expect( token::FN, "Expected 'fn' keyword." );
+    expect( token::LPAREN, "Expected '(' after 'fn'"  );
+    auto params { parse_params(  ) };
+    expect( token::RPAREN, "Expected ')' after parameters." );
+    expect( token::ARROW, "Expected '->' after enclosed parameters." );
+    auto ret_type_name { expect( token::IDENTIFIER, "Expected return type after '->' in function prototype." ) };
+    auto ret_type { std::make_unique< Type >( TypeKind::Simple, ret_type_name, std::nullopt ) };
 
-        expect( token::EQUALS, "Expected '=' after variable name." );
+    /// Parse the function prototype body.
+    auto body { parse_block(  ) };
+    auto block_stmt { std::unique_ptr< BlockStmt >( dynamic_cast< BlockStmt * >( body.release(  ) ) ) };
+    /// Ensure the block exists
+    if ( !block_stmt ) throw std::runtime_error( "[juno::parse_error] Expected block statement for function body." );
 
-        auto value { parse_expr(  ) };
+    return std::make_unique< FunctionPrototype >(
+        std::move( params ),
+        std::move( ret_type ),
+        std::move( block_stmt )
+    );
+}
 
-        expect( token::SEMI, "Expected ';' after variable declaration statement." );
+std::vector< Parameter > parser::Parser::parse_params( )
+{
+    std::vector< Parameter > params;
 
-        return std::make_unique< VariableDeclaration >( std::move( name ) , std::move( value ), std::move( type ) );
+    if ( check( token::RPAREN ) ) return params;
+
+    /// Parse the first parameter right here
+    auto param_name { expect( token::IDENTIFIER, "Expected identifier name." ) };
+    expect( token::COLON, std::format( "Expected ':' after parameter name '{}'.", param_name ) );
+    auto param_type_name { expect( token::IDENTIFIER, "Expected parameter type" ) };
+
+    auto param_type { std::make_unique< Type >( TypeKind::Simple, param_type_name, std::nullopt )};
+    params.emplace_back( param_name, std::move( param_type ) );
+
+    /// Parse the remaining parameters
+    while ( match(token::COMMA) )
+    {
+        auto n_param_name { expect( token::IDENTIFIER, "Expected identifier name." ) };
+        expect( token::COLON, std::format( "Expected ':' after parameter name '{}'.", n_param_name ) );
+        auto n_param_type_name { expect( token::IDENTIFIER, "Expected parameter type" ) };
+
+        auto n_param_type { std::make_unique< Type >( TypeKind::Simple, n_param_type_name, std::nullopt )};
+        params.emplace_back( n_param_name, std::move( n_param_type ) );
     }
 
-    std::println("::parse_stmt() current value = {}", m_current.value);
+    return params;
+}
 
-    if ( m_current.token_type == token::LBRACE || m_current.token_type == token::BUILTIN )
+std::unique_ptr< Statement > parser::Parser::parse_var_decl( )
+{
+    eat(  );
+
+    auto name { expect( token::IDENTIFIER, "Expected variable name after 'let'." ) };
+
+    /// Parse the optional type annotation, will be inferred later.
+    std::unique_ptr< Type > type { nullptr };
+    if ( match( token::COLON ) )
     {
-        // eat(  );
-        auto block { parse_block(  ) };
-        expect( token::RBRACE, "Expected '}' to close code block." );
-        return block;
+        const auto type_name { expect( token::IDENTIFIER, std::format( "Expected type name after '{}:'", name ) ) };
+        type = std::make_unique< Type >( TypeKind::Simple, type_name, std::nullopt );
     }
 
-    std::println("AT BEFORE ERR = {}", m_current.value);
+    expect( token::EQUALS, "Expected '=' in variable declaration." );
+    auto value { parse_expr(  ) };
+    expect( token::SEMI, "Expected ';' after variable declaration." );
 
-    auto expr_stmt { std::make_unique< ExpressionStatement >( parse_expr( ) ) };
+    return std::make_unique< VariableDeclaration >(
+        std::move( name ),
+        std::move( value ),
+        std::move( type )
+    );
+}
+
+std::unique_ptr< Statement > parser::Parser::parse_expr_stmt( )
+{
+    auto expr { parse_expr(  ) };
     expect( token::SEMI, "Expected ';' after expression statement." );
-    return expr_stmt;
+
+    return std::make_unique< ExpressionStatement >( std::move( expr ) );
 }
 
 std::unique_ptr< Statement > parser::Parser::parse_block( )
@@ -183,19 +259,24 @@ std::unique_ptr< Statement > parser::Parser::parse_block( )
             eat(  );
         } else
         {
-            throw std::runtime_error( std::format( "[juno::parse_error] Blocks can only be prefixed with @profile, not '{}'", m_current.value ) );
+            throw std::runtime_error(
+                std::format( "[juno::parse_error] Unknown annotation '{}'. Only @profile is supported.",
+                    m_current.value )
+            );
         }
     }
 
-    eat(  );
+    expect( token::LBRACE, "Expected '{' to start block." );
 
     std::vector< std::unique_ptr< Statement > > stmts { };
 
-    while ( m_current.token_type != token::RBRACE )
+    while ( !check( token::RBRACE ) && m_current.token_type != token::TokenType::END_OF_FILE )
     {
         std::unique_ptr stmt { parse_stmt(  ) };
         stmts.push_back( std::move( stmt ) );
     }
+
+    expect( token::RBRACE , "Expected '}' to close block." );
 
     return std::make_unique< BlockStmt >( std::move( stmts ), is_profiled );
 }
@@ -204,6 +285,22 @@ void parser::Parser::eat( )
 {
     if ( m_position < m_tokens.size(  ) - 1 )
         m_current = m_tokens[ ++m_position ];
+}
+
+bool parser::Parser::check( const token::TokenType type ) const
+{
+    return m_current.token_type == type;
+}
+
+bool parser::Parser::match( token::TokenType type )
+{
+    if ( check( type ) )
+    {
+        eat(  );
+        return true;
+    }
+
+    return false;
 }
 
 std::string parser::Parser::expect( const token::TokenType type, const std::string_view error_message )

@@ -24,14 +24,31 @@ namespace parser
 
         ///@brief Parse a statement.
         std::unique_ptr< Statement > parse_stmt();
+        ///@brief Parse a variable declaration.
+        std::unique_ptr< Statement > parse_var_decl();
+        ///@brief Parse an expression statement (a statement which wraps an expression).
+        std::unique_ptr< Statement > parse_expr_stmt();
         ///@brief Parse a collection of statements into a block.
         std::unique_ptr< Statement > parse_block();
+        ///@brief Parse a function prototype as named or anonymous (lambda).
+        std::unique_ptr< Statement > parse_prototype();
+        ///@brief Parse a function prototype as named or anonymous (lambda).
+        std::unique_ptr< Statement > parse_lambda();
+        ///@brief Parse function prototype parameters.
+        std::vector< Parameter > parse_params();
+
         ///@brief Parse an expression.
         std::unique_ptr< Expression > parse_expr();
         ///@brief Parse a precedence level.
         std::unique_ptr< Expression > parse_precedence( int min_precedence );
         ///@brief Parse a primary expression.
         std::unique_ptr< Expression > parse_prim();
+        ///@brief Parse a number expression.
+        std::unique_ptr< Expression > parse_number();
+        ///@brief Parse an identifier expression.
+        std::unique_ptr< Expression > parse_identifier();
+        ///@brief Parse a group of expressions encapsulated by parenthesis.
+        std::unique_ptr< Expression > parse_group();
         ///@brief Parse a list of arguments.
         std::vector< std::unique_ptr< Expression > > parse_args();
 
@@ -39,10 +56,19 @@ namespace parser
 
         ///@brief Advance onto the next token in the tokens vector.
         void eat( );
+
         ///@brief Expect the current token type to be an expected
         ///type, if not an error will be thrown.
         ///If no error is thrown, the function will return the value of the token.
         std::string expect( token::TokenType type, std::string_view error_message );
+
+        ///@brief Check if the current token matches type of the given type AND DO NOT CONSUME
+        [[nodiscard]]
+        bool check( token::TokenType type ) const;
+
+        ///@brief Check if the current token matches the type of the givenn type and consume.
+        ///@return true if the token was matched.
+        bool match( token::TokenType type );
 
         ///@brief Helper function which creates a new BinaryOp struct if the current token is one.
         [[nodiscard]]

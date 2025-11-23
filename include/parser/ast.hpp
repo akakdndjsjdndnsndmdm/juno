@@ -9,6 +9,8 @@
 class IdentifierLit;
 class CallExpression;
 class BinaryExpression;
+class FunctionPrototype;
+class FunctionExpression;
 class Number;
 
 ///@brief This essentially allows a more robust way to access
@@ -23,6 +25,8 @@ public:
     virtual void visit( const BinaryExpression& b ) = 0;
     virtual void visit( const CallExpression& c ) = 0;
     virtual void visit( const IdentifierLit& c ) = 0;
+    virtual void visit( const FunctionPrototype& c ) = 0;
+    virtual void visit( const FunctionExpression& c ) = 0;
 };
 
 class Expression
@@ -364,6 +368,154 @@ public:
     std::unique_ptr< Expression > m_lhs { nullptr };
     std::unique_ptr< Expression > m_rhs { nullptr };
     BinaryOp m_op { BinaryOp::NOP };
+};
+
+///@brief This structure represents a parameter in a function prototype.
+struct Parameter
+{
+    std::string name;
+    std::unique_ptr< Type > type;
+
+    explicit Parameter( std::string _name, std::unique_ptr< Type > _type )
+        : name { std::move( _name ) }, type { std::move( _type ) }
+    {}
+};
+
+///@brief This class represents a function prototype
+/// this class supports named functions and lambdas
+class FunctionPrototype final : public Statement
+{
+public:
+    ///@brief This constructor is for named functions (non-lambdas).
+    explicit FunctionPrototype(
+        std::string name,
+        std::vector< Parameter > params,
+        std::unique_ptr< Type > ret_type,
+        std::unique_ptr< BlockStmt > body
+    ) :
+        m_name { std::move( name ) },
+        m_params { std::move( params ) },
+        m_ret_type { std::move( ret_type ) },
+        m_body { std::move( body ) }
+    {}
+
+    ///@brief This constructor is for lambdas.
+    explicit FunctionPrototype(
+        std::vector< Parameter > params,
+        std::unique_ptr< Type > ret_type,
+        std::unique_ptr< BlockStmt > body
+    ) :
+        m_params { std::move( params ) },
+        m_ret_type { std::move( ret_type ) },
+        m_body { std::move( body ) },
+        m_is_lambda { true }
+    {}
+
+    [[nodiscard]]
+    std::string_view get_name() const
+    {
+        return m_name;
+    }
+
+    [[nodiscard]]
+    const std::vector< Parameter >& get_params() const
+    {
+        return m_params;
+    }
+
+    [[nodiscard]]
+    const std::unique_ptr< Type >& get_return_type() const
+    {
+        return m_ret_type;
+    }
+
+    [[nodiscard]]
+    const std::unique_ptr< BlockStmt >& get_body() const
+    {
+        return m_body;
+    }
+
+    [[nodiscard]]
+    std::unique_ptr< BlockStmt >& get_body()
+    {
+        return m_body;
+    }
+
+    [[nodiscard]]
+    bool is_lambda() const
+    {
+        return m_is_lambda;
+    }
+private:
+    ///@brief Function prototype name, if it is empty then it's a lambda
+    std::string m_name;
+    ///@brief Function prototype's parameters.
+    std::vector< Parameter > m_params;
+    ///@brief Function prototype's return type.
+    std::unique_ptr< Type > m_ret_type { nullptr };
+    ///@brief Function prototype's body
+    std::unique_ptr< BlockStmt > m_body { nullptr };
+    ///@brief Determines if the function prototype is a lambda
+    bool m_is_lambda { false };
+};
+
+///@brief A wrapper class for a function prototype, it allows for functions to become
+///expressions
+class FunctionExpression final : public Expression
+{
+public:
+    explicit FunctionExpression( std::unique_ptr< FunctionPrototype > proto )
+        : Expression { Identifier }, /// will change later, tired ash
+          m_proto { std::move( proto ) }
+    {}
+
+    void accept(Visitor &v) const override
+    {
+        if ( m_proto ) v.visit( *m_proto );
+    }
+
+    [[nodiscard]]
+    const std::unique_ptr< FunctionPrototype >& get_proto( ) const
+    {
+        return m_proto;
+    }
+
+    [[nodiscard]]
+    std::unique_ptr< FunctionPrototype >& get_proto( )
+    {
+        return m_proto;
+    }
+
+  private:
+    std::unique_ptr< FunctionPrototype > m_proto;
+};
+
+///@brief A simple return statement.
+class ReturnStatement final : public Statement
+{
+public:
+    explicit ReturnStatement( std::unique_ptr< Expression > value )
+        : m_value { std::move( value ) } {}
+
+    [[nodiscard]]
+    const std::unique_ptr< Expression >& get_value() const
+    {
+        return m_value;
+    }
+
+    [[nodiscard]]
+    std::unique_ptr< Expression >& get_value()
+    {
+        return m_value;
+    }
+
+    [[nodiscard]]
+    bool has_value() const
+    {
+        return m_value != nullptr;
+    }
+private:
+    std::unique_ptr< Expression > m_value { nullptr };
 };
 
 /*

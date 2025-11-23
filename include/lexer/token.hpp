@@ -26,8 +26,11 @@ namespace token
         COMMA,
         COLON,
         BUILTIN,
+        WITH,
         PRINT,
         SEMI,
+        ARROW,
+        FN,
         LET,
         END_OF_FILE
     };

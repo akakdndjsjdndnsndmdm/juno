@@ -13,6 +13,16 @@ std::vector<token::Token> lexer::Lexer::tokenize()
         )
         {
             advance(  );
+        } else if ( current == '-' && *peek_ahead(  ) == '>' ) { /// Process arrow symbol
+            tokens.emplace_back(
+                token::ARROW,
+                std::string { "->" },
+                line,
+                col
+            );
+
+            advance(  );
+            advance(  );
         } else if ( token_character_map.contains( current ) ) /// Process single character tokens such as + - * /
         {
             auto token_type { token_character_map.at( current ) };

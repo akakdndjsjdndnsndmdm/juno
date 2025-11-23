@@ -36,6 +36,8 @@ namespace lexer
     {
         { "let", token::TokenType::LET },
         { "print", token::TokenType::PRINT },
+        { "with", token::TokenType::WITH },
+        { "fn", token::TokenType::FN },
         { "@profile", token::TokenType::BUILTIN },
     };
 

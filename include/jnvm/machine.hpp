@@ -8,6 +8,7 @@
 #include <functional>
 #include <print>
 #include <span>
+#include <stack>
 #include <stdexcept>
 #include <vector>
 
@@ -16,11 +17,37 @@ namespace jnvm::machine
     using namespace jnvm::inst;
 
     constexpr std::size_t REGISTER_COUNT { 256 };
+    constexpr std::size_t STACK_SIZE { 4096 };
 
     static void error( const std::string& message )
     {
         throw std::runtime_error( std::format( "[jnvm::error] {}", message ) );
     }
+
+    ///@brief This structure represents a stack frame which is essential for tracking function calls.
+    struct StackFrame
+    {
+        ///@brief Where the machine should return to after calling
+        std::size_t return_addr;
+        ///@brief The base register for the frames local variables
+        std::uint8_t frame_ptr;
+        ///@brief The amount of parameters passed.
+        std::uint8_t param_count;
+        ///@brief The amount of Local variables.
+        std::uint8_t local_count;
+        ///@brief An array of registers which the frame must save
+        std::array< std::uint32_t, REGISTER_COUNT > saved_regs { };
+
+        StackFrame( const std::size_t return_addr, const std::uint8_t frame_ptr, const std::uint8_t param_count,
+                    const std::uint8_t local_count, const std::array< std::uint32_t, REGISTER_COUNT > &saved_regs ) :
+            return_addr { return_addr },
+            frame_ptr { frame_ptr },
+            param_count { param_count },
+            local_count { local_count },
+            saved_regs { saved_regs }
+        {
+        }
+    };
 
     class Machine
     {
@@ -28,13 +55,14 @@ namespace jnvm::machine
         explicit Machine() = default;
 
         ///@brief Load a new program into the machine.
-        ///@details Clears all registers and resets the program counter.
+        ///@details Clears all registers and resets the program counter, and the call stack.
         void load( const std::vector< std::uint32_t > &_bytecode )
         {
             bytecode = _bytecode;
             pc = 0;
 
             std::fill( std::begin( registers ), std::end( registers ), 0 );
+            while ( !call_stack.empty(  ) ) call_stack.pop(  );
         }
 
         ///@brief Execute the bytecode.
@@ -110,6 +138,7 @@ namespace jnvm::machine
                         if ( registers[ inst.op1(  ) ] != 0 )
                         {
                             pc = inst.op2(  );
+                            continue; /// Without this, the pc++ at the end would still happen
                         }
                         break;
                     }
@@ -117,13 +146,12 @@ namespace jnvm::machine
                     case Opcode::JMP:
                     {
                         pc = inst.op1(  );
-                        break;
+                        continue;
                     }
 
                     case Opcode::HLT:
                     {
-                        /// Terminate the machine and return the first register.
-                        break;
+                        return registers[ 0 ];
                     }
 
                     case Opcode::PRF:
@@ -142,16 +170,32 @@ namespace jnvm::machine
 
                     case Opcode::CALL:
                     {
-                        const VMNative native { inst.op1(  ) };
+                        const auto func_addr{ inst.op1(  ) };
                         const auto base_reg { inst.op2(  ) };
                         const auto arg_count { inst.op3(  ) };
 
-                        if ( natives.contains( native ) )
+                        /// The virtual machine is expected to call both native and user functions now.
+                        if ( func_addr >= 128 ) /// IS it a native?
                         {
-                            const auto fn { natives[ native ] };
-                            fn( base_reg, arg_count );
+                            if ( const auto id { static_cast< VMNative >( func_addr ) }; natives.contains( id ) )
+                            {
+                                const auto fn { natives[ id ] };
+                                fn( base_reg, arg_count );
+                            } else
+                            {
+                                error( std::format( "Unknown native function '{}'", func_addr ) );
+                            }
+                        } else
+                        {
+                            call_fn( func_addr, base_reg, arg_count );
                         }
 
+                        break;
+                    }
+
+                    case Opcode::RET:
+                    {
+                        return_from_fn();
                         break;
                     }
 
@@ -169,13 +213,46 @@ namespace jnvm::machine
     private:
         std::array< std::uint32_t, REGISTER_COUNT > registers { };
         std::vector< std::uint32_t > bytecode { };
+        ///@brief Program counter.
         std::size_t pc { 0 };
+        ///@brief Frame pointer.
+        std::uint8_t fp { 0 };
 
+        std::stack< StackFrame > call_stack;
+        ///@brief Functions ID mapped to it's bytecode address (position).
+        std::unordered_map< std::uint8_t, std::size_t > user_funcs;
         std::chrono::steady_clock::time_point profiler_start_time;
+
+        ///@brief This method will call a user defined function.
+        void call_fn( const std::uint8_t fn_addr, const std::uint8_t base_reg, const std::uint8_t arg_count )
+        {
+            const StackFrame frame( pc + 1, fp, arg_count, 0, registers );
+            call_stack.push( frame );
+            fp = base_reg;
+            pc = fn_addr;
+            pc--; /// DO NOT increment, i found this out because execute() already handles it but we'll end up skipped ahead if we inc
+        }
+
+        ///@brief Return from a user defined function
+        void return_from_fn()
+        {
+            if ( call_stack.empty(  ) ) error( "Return called with empty call stack" );
+
+            const auto return_val { registers[ fp ] };
+            const auto frame { call_stack.top(  ) };
+            call_stack.pop(  );
+
+            /// Restore
+            registers = frame.saved_regs;
+            pc = frame.return_addr;
+            fp = frame.frame_ptr;
+            /// Store in register 0, the callers register.
+            registers[ 0 ] = return_val;
+        }
 
         std::unordered_map< VMNative, std::function< void( std::uint8_t base_reg, std::size_t arg_count ) > > natives {
             /// print
-            {
+                {
                     VMNative::PRINT, // index
                     [ this ]( const std::uint8_t base_reg, const std::size_t arg_count ) // function
                     {
@@ -186,7 +263,7 @@ namespace jnvm::machine
 
                         std::println("");
                     }
-            }
+                }
         };
     };
 }

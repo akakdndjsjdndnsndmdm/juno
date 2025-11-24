@@ -3,18 +3,45 @@
 
 std::vector< std::uint32_t > Compiler::compile( )
 {
-    /// Reset any state in the compiler.
+    /// Reset any state in the compiler
     bytecode.clear(  );
     nx_register = 0;
+    function_addrs.clear(  );
 
     /// Enter the global scope
     enter_scope(  );
 
-    /// Compile all statements in the AST.
+    /// PASS 0: Reserve space for jump over all functions
+    const auto main_jmp_addr = bytecode.size();
+    emit(jnvm::inst::Instruction(jnvm::inst::Opcode::JMP, 0)); // Placeholder
+
+    /// PASS 1: Compile all function prototypes first
     for ( const auto& s : ast )
+    {
+        if ( const auto* proto { dynamic_cast< const FunctionPrototype * >( s.get() ) } )
+            comp_prototype( *proto );
+    }
+
+    /// PASS 2: Now patch the jump to skip to main code
+    const auto main_code_addr = bytecode.size();
+    bytecode[main_jmp_addr] = jnvm::inst::Instruction(
+        jnvm::inst::Opcode::JMP,
+        static_cast<std::uint8_t>(main_code_addr)
+    ).data();
+
+    std::println("Main code starts at: {}", main_code_addr);
+
+    /// PASS 3: Compile main code (now function_addrs is populated!)
+    for ( const auto& s : ast )
+    {
+        if ( dynamic_cast< const FunctionPrototype * >( s.get() ) )
+            continue;
+
         comp_statement( *s );
+    }
 
     emit(jnvm::inst::Instruction(jnvm::inst::Opcode::HLT));
+
     return bytecode;
 }
 
@@ -68,7 +95,7 @@ void Compiler::comp_statement( const Statement &stmt )
         if ( block_stmt->is_profiled(  ) ) emit( jnvm::inst::Instruction( jnvm::inst::Opcode::PRFE ) );
     } else if ( const auto *proto { dynamic_cast< const FunctionPrototype * >( &stmt ) } )
     {
-        std::println("PROTOTYPE NAME = {}", proto->get_name(  ));
+
     } else
     {
         throw std::runtime_error("[juno::compile_error] unknown statement type.");
@@ -140,24 +167,57 @@ std::uint8_t Compiler::comp_expression( const Expression *expr )
     {
         const auto& args { call->get_args(  ) };
         const auto& callee { call->get_callee(  ) };
-
-        const auto first_reg { comp_expression( args[ 0 ].get( ) ) };
         const auto arg_count { args.size(  ) };
 
-        /// 22/11/2025 - I subtracted 1 from arg_count because I wanted to exclude the first arg
-        ///              now it has been removed and now the args are compiled.
+        const auto first_reg { comp_expression( args[ 0 ].get( ) ) };
         for ( int idx { 1 }; idx < arg_count; idx++ )
             comp_expression( args[ idx ].get( ) );
 
-        emit(jnvm::inst::Instruction(
-            jnvm::inst::Opcode::CALL,
-            static_cast< std::uint8_t >( native_map[ callee ] ),
-            first_reg,
-            arg_count
-        ));
+        if ( function_addrs.contains( callee ) )
+        {
+            emit(jnvm::inst::Instruction(
+                jnvm::inst::Opcode::CALL,
+                static_cast< std::uint8_t >( function_addrs[ callee ] ),
+                first_reg,
+                arg_count
+            ));
 
-        return first_reg;
+            return first_reg;
+        }
+
+        if ( native_map.contains( callee ) )
+        {
+            emit(jnvm::inst::Instruction(
+                jnvm::inst::Opcode::CALL,
+                static_cast< std::uint8_t >( native_map[ callee ] ),
+                first_reg,
+                arg_count
+            ));
+
+            return first_reg;
+        }
+
+        throw std::runtime_error( std::format( "[juno::compile_error] unknown function '{}'", callee ) );
     }
 
     throw std::runtime_error( "[juno::compile_error] unknown expression type." );
+}
+
+void Compiler::comp_prototype( const FunctionPrototype &proto )
+{
+    /// The start address of the function is the size of the bytecode
+    function_addrs[ std::string( proto.get_name(  ) ) ] = bytecode.size(  );
+    /// Save reg state
+    const auto saved_reg { nx_register };
+    nx_register = 0;
+    /// Set up the frame, prologue
+    enter_scope(  );
+    /// Allocate space for params
+    for ( const auto& p : proto.get_params(  ) )
+        scopes.back(  ).variables[ p.name ] = nx_register++;
+    /// Compile func body block
+    comp_statement( *proto.get_body(  ) );
+    exit_scope(  );
+    emit( jnvm::inst::Instruction(jnvm::inst::Opcode::RET) );
+    nx_register = saved_reg;
 }

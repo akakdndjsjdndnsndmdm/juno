@@ -1,0 +1,6 @@
+fn foo(a: int) -> int @profile {
+    let sum = a * 10;
+    print( sum );
+}
+
+foo(5);

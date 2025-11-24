@@ -46,6 +46,18 @@ Block took 122us, processed 8 instructions.
 
 Juno has special keywords and functions prefixed with `@`, for example the `@profile` can prefix a block of code or a functions body, it will the automatically print the time it took to execute the block of code, and how many instructions were executed. This is useful for optimizing your programs and measuring different approaches to a solution.
 
+### Snippets
+```
+fn foo(a: int) -> int @profile {
+    let sum = a * 10;
+    print( sum );
+}
+
+foo(5);
+```
+
+This snippet demonstrates defining a user function, since the body of the function is a block, we can still prefix it with special keywords such as `@profile`, and of course variables are automatically cleaned up.
+
 # Roadmap
 * [x] Bytecode VM
 * [x] Variables and expressions

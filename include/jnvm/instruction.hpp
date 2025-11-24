@@ -24,13 +24,14 @@ namespace jnvm::inst
         CALL,   /// Call a function or native function
         PRF,    /// Start profiling
         PRFE,   /// End profiling
+        RET,    /// Return from a function
         DBG     /// A DEBUG INSTRUCTION
     };
 
     ///@brief An enum of native functions ordered by their index.
     enum class VMNative : std::size_t
     {
-        PRINT,
+        PRINT = 128,
     };
 
     ///@brief A helper function which returns a string_view which contains the opcodes name.
@@ -50,6 +51,7 @@ namespace jnvm::inst
             { Opcode::DBG, "DBG" },
             { Opcode::PRF, "PRF" },
             { Opcode::PRFE, "PFRE" },
+            { Opcode::RET, "RET" },
         };
 
         return opcode_To_string.contains( opcode ) ? opcode_To_string[ opcode ] : "?";

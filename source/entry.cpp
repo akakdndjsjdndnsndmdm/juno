@@ -6,6 +6,7 @@
 #include "lexer/lexer.hpp"
 #include "parser/parser.hpp"
 
+#include <fstream>
 #include <iostream>
 #include <print>
 
@@ -27,9 +28,19 @@ std::int32_t main( )
             system_util::get_system_platform(  )
         );
 
-        constexpr std::string_view test_source = "fn foo(a: int) -> int @profile { let x = 10; }";
+        const std::string test_path { "../../tests/main.jn" };
 
-        Lexer lexer { test_source };
+        std::ifstream file { test_path };
+        std::string line;
+        std::string content;
+        while ( std::getline( file, line ) )
+        {
+            content += line;
+            content.push_back( '\n' );
+        }
+        file.close(  );
+
+        Lexer lexer { content };
         auto tokens { lexer.tokenize( ) };
         Parser parser { tokens };
         Compiler compiler { parser.parse( ) };

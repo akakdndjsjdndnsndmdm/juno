@@ -28,6 +28,8 @@ private:
     std::uint8_t nx_register { 0 }; /// The next register to be allocated.
     std::vector< Scope > scopes { };
 
+    std::unordered_map< std::string, std::size_t > function_addrs;
+
     std::unordered_map< std::string_view, jnvm::inst::VMNative > native_map {
         { "print", jnvm::inst::VMNative::PRINT }
     };
@@ -44,6 +46,9 @@ private:
 
     ///@brief This method will compile a statement.
     void comp_statement( const Statement& stmt );
+
+    ///@brief This method will compile a function prototype.
+    void comp_prototype( const FunctionPrototype& proto );
 
     ///@brief This method will compile an expression and returns a register index.
     std::uint8_t comp_expression( const Expression* expr );

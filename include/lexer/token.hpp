@@ -14,6 +14,7 @@ namespace token
     {
         IDENTIFIER,
         NUMBER,
+        STRING,
         LPAREN,
         RPAREN,
         LBRACE,

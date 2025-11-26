@@ -12,6 +12,7 @@ class BinaryExpression;
 class FunctionPrototype;
 class FunctionExpression;
 class Number;
+class String;
 
 ///@brief This essentially allows a more robust way to access
 ///the underlying values of a derived class of an Expression.
@@ -22,6 +23,7 @@ class Visitor
 public:
     virtual ~Visitor() = default;
     virtual void visit( const Number& n ) = 0;
+    virtual void visit( const String& s ) = 0;
     virtual void visit( const BinaryExpression& b ) = 0;
     virtual void visit( const CallExpression& c ) = 0;
     virtual void visit( const IdentifierLit& c ) = 0;
@@ -41,6 +43,7 @@ public:
     enum ExpressionType
     {
         Number,
+        String,
         BinaryExpr,
         CallExpr,
         Identifier,
@@ -251,8 +254,35 @@ public:
         return !( lhs < rhs );
     }
 
-  private:
+private:
     double m_value { 0.0 };
+};
+
+class String final : public Expression
+{
+public:
+    explicit String( std::string value )
+        : Expression { ExpressionType::String },
+          m_value {std::move( value )}
+    { }
+
+    void accept(Visitor &v) const override
+    {
+        v.visit( *this );
+    }
+
+    [[nodiscard]]
+    const std::string &get_value( ) const
+    {
+        return m_value;
+    }
+
+    friend bool operator== ( const String &lhs, const String &rhs )
+    {
+        return lhs == static_cast< const Expression & >( rhs ) && lhs.m_value == rhs.m_value;
+    }
+private:
+    std::string m_value;
 };
 
 struct BinaryOp

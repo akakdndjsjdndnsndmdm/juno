@@ -1,6 +1,5 @@
-fn foo(a: int) -> int @profile {
-    let sum = a * 10;
-    print( sum );
+fn adder(a: double, b: double) -> double {
+    return a + b;
 }
 
-foo(5);
+print(adder(10, 50));

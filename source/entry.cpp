@@ -10,6 +10,7 @@
 #include <fstream>
 #include <iostream>
 #include <print>
+#include <utility>
 
 using namespace lexer;
 using namespace parser;
@@ -29,7 +30,7 @@ std::int32_t main( )
             system_util::get_system_platform(  )
         );
 
-        const std::string test_path { "../../tests/comptime.jn" };
+        const std::string test_path { "../../tests/function.jn" };
 
         std::ifstream file { test_path };
         std::string line;
@@ -49,13 +50,10 @@ std::int32_t main( )
         // type_solver.solve( ast );
         Compiler compiler { std::move( ast ) };
         Machine  machine;
-
-        auto bytecode { compiler.compile( ) };
-
-        // std::println( "bytecode: {}", bytecode );
-
-        machine.load( bytecode );
-        machine.execute( );
+        auto compiler_result { compiler.compile(  ) };
+        machine.load( compiler_result.bytecode );
+        machine.load_strings( compiler_result.string_pool );
+        const auto first { machine.execute( ) };
     }
     catch ( const std::exception& err )
     {

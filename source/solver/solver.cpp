@@ -67,6 +67,11 @@ void Solver::visit( const Number &n )
     m_last = TypeExtended { TypeKind::Simple, "double" };
 }
 
+void Solver::visit( const String &s )
+{
+    m_last = TypeExtended { TypeKind::Simple, "string" };
+}
+
 void Solver::visit( const CallExpression &c )
 {
     /// Find the function return type.

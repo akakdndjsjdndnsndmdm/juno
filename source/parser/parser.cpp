@@ -13,6 +13,8 @@ std::vector< std::unique_ptr< Statement > > parser::Parser::parse( )
 
     while ( m_current.token_type != token::TokenType::END_OF_FILE )
     {
+        if ( check( token::END_OF_FILE ) ) std::println("EOF");
+
         if ( auto stmt = parse_stmt( ) )
             ast.push_back( std::move( stmt ) );
     }
@@ -56,7 +58,8 @@ std::unique_ptr< Expression > parser::Parser::parse_prim( )
 {
     switch ( m_current.token_type )
     {
-        case token::NUMBER: return parse_number();
+        case token::NUMBER: return parse_number( );
+        case token::STRING: return parse_string(  );
         case token::PRINT:
         case token::IDENTIFIER:
             return parse_identifier();
@@ -92,6 +95,13 @@ std::unique_ptr< Expression > parser::Parser::parse_number( )
     eat(  );
 
     return std::make_unique< Number >( value );
+}
+
+std::unique_ptr< Expression > parser::Parser::parse_string( )
+{
+    std::string value { m_current.value };
+    eat(  );
+    return std::make_unique< String >( value );
 }
 
 std::unique_ptr< Expression > parser::Parser::parse_identifier( )
@@ -265,7 +275,9 @@ std::unique_ptr< Statement > parser::Parser::parse_var_decl( )
 std::unique_ptr< Statement > parser::Parser::parse_expr_stmt( )
 {
     auto expr { parse_expr(  ) };
-    expect( token::SEMI, "Expected ';' after expression statement." );
+    // expect( token::SEMI, "Expected ';' after expression statement." );
+    /// Optional
+    if ( check( token::SEMI ) ) eat(  );
 
     return std::make_unique< ExpressionStatement >( std::move( expr ) );
 }
@@ -303,10 +315,13 @@ std::unique_ptr< Statement > parser::Parser::parse_block( )
     return std::make_unique< BlockStmt >( std::move( stmts ), is_profiled );
 }
 
-void parser::Parser::eat( )
+void parser::Parser::eat()
 {
-    if ( m_position < m_tokens.size(  ) - 1 )
-        m_current = m_tokens[ ++m_position ];
+    ++m_position;
+    if (m_position < m_tokens.size())
+    {
+        m_current = m_tokens[m_position];
+    }
 }
 
 bool parser::Parser::check( const token::TokenType type ) const
@@ -329,7 +344,9 @@ std::string parser::Parser::expect( const token::TokenType type, const std::stri
 {
     if ( m_current.token_type != type )
         throw std::runtime_error(
-            std::format( "[juno::parse_error] {}",
+            std::format( "[juno::parse_error ln:{},col:{}] {}",
+                m_current.line,
+                m_current.col,
                 std::string { error_message }
             ));
 

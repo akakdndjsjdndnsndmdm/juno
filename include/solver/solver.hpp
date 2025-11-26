@@ -65,6 +65,7 @@ public:
     ///@brief Expression visitor methods
     void visit( const BinaryExpression &b ) override;
     void visit( const Number &n ) override;
+    void visit( const String &s ) override;
     void visit( const CallExpression &c ) override;
     void visit( const IdentifierLit &i ) override;
     void visit( const FunctionPrototype &f ) override;

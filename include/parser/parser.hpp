@@ -45,8 +45,10 @@ namespace parser
         std::unique_ptr< Expression > parse_precedence( int min_precedence );
         ///@brief Parse a primary expression.
         std::unique_ptr< Expression > parse_prim();
-        ///@brief Parse a number expression.
+        ///@brief Parse a numeric literal as a number expression.
         std::unique_ptr< Expression > parse_number();
+        ///@brief Parse a string literal as a string expression.
+        std::unique_ptr< Expression > parse_string();
         ///@brief Parse an identifier expression.
         std::unique_ptr< Expression > parse_identifier();
         ///@brief Parse a group of expressions encapsulated by parenthesis.

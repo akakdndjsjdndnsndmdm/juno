@@ -54,7 +54,7 @@ namespace lexer
         std::vector< token::Token > tokenize( );
     private:
         std::string source;
-        std::size_t line { 1 };
+        std::size_t line { 0 };
         std::size_t col { 1 };
         std::size_t pos { 0 };
 

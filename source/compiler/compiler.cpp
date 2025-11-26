@@ -1,248 +1,370 @@
 #include <print>
 #include <compiler/compiler.hpp>
 
-EvalVisitor eval_visitor;
+const std::unordered_map< std::string_view, jnvm::inst::VMNativeID > Compiler::m_natives_map = {
+    { "print", jnvm::inst::VMNativeID::PRINT }
+};
 
-std::vector< std::uint32_t > Compiler::compile( )
+Compiler::CompilerResult Compiler::compile( )
 {
-    /// Reset any state in the compiler
-    bytecode.clear(  );
-    nx_register = 0;
-    function_addrs.clear(  );
-
-    /// Enter the global scope
+    reset(  );
+    /* Create a global scope */
     enter_scope(  );
 
-    for ( const auto& s : ast )
-    {
-        if ( const auto* proto { dynamic_cast< const FunctionPrototype * >( s.get() ) } )
-            comp_prototype( *proto );
-    }
+    /* Temporary: reserve some space for a jump instruction at position 0 */
+    const auto jmp_addr { current_addr(  ) };
+    emit( jnvm::inst::Instruction( jnvm::inst::Opcode::JMP, jmp_addr ) );
+    /* Run the passes */
+    pass_collect_prototypes(  );
+    /* Path the jump to skip "global" */
+    const auto start { current_addr(  ) };
+    m_bytecode[ jmp_addr ] = jnvm::inst::Instruction( jnvm::inst::Opcode::JMP, start).data(  );
+    compile_global_stmts(  );
 
-    std::println("ast size: {}", ast.size(  ));
-
-
-    for ( const auto& s : ast )
-    {
-        if ( dynamic_cast< const FunctionPrototype * >( s.get() ) )
-            continue;
-
-        std::println("compiling statement");
-
-        comp_statement( *s );
-    }
-
-    std::println("EMIT HLT");
-    emit(jnvm::inst::Instruction(jnvm::inst::Opcode::HLT));
-
-    return bytecode;
+    /* ALWAYS emit hlt :3 */
+    emit( jnvm::inst::Instruction(jnvm::inst::Opcode::HLT) );
+    return CompilerResult {
+        .bytecode = std::move( m_bytecode ),
+        .string_pool = std::move( m_string_pool ),
+        .functions = std::move( m_functions )
+    };
 }
 
-void Compiler::emit( const jnvm::inst::Instruction &inst )
+void Compiler::reset( )
 {
-    std::println( "{}", jnvm::inst::opcode_to_string( inst.opcode(  ) ) );
-    std::println( "next reg: {}", nx_register );
+    /* Simply just reset everything to an original state */
+    m_bytecode.clear(  );
+    m_string_pool.clear(  );
+    m_functions.clear(  );
+    m_scopes.clear(  );
+    m_next_register = 0;
+}
 
-    bytecode.push_back( inst.data(  ) );
+void Compiler::pass_collect_prototypes( )
+{
+    for ( const auto& stmt : m_ast )
+    {
+        if ( const auto* proto { dynamic_cast< const FunctionPrototype* >( stmt.get(  ) ) } )
+        {
+            m_functions[ std::string( proto->get_name(  ) ) ] = current_addr(  );
+            comp_proto_stmt( *proto );
+        }
+    }
+}
 
-    std::println("bytecode at emission: {}", bytecode);
+void Compiler::compile_global_stmts( )
+{
+    for ( const auto& stmt : m_ast )
+    {
+        /* don't recompile protypes, skip them */
+        if ( dynamic_cast< const FunctionPrototype* >( stmt.get(  ) ) ) continue;
+
+        comp_statement( *stmt );
+    }
+}
+
+void Compiler::emit( const jnvm::inst::Instruction &instruction )
+{
+    m_bytecode.push_back( instruction.data(  ) );
 }
 
 void Compiler::enter_scope( )
 {
-    const auto scope { Scope { nx_register } };
-    scopes.emplace_back( scope );
+    m_scopes.emplace_back( m_next_register );
 }
 
 void Compiler::exit_scope( )
 {
-    const Scope scope { scopes.back(  ) };
-    scopes.pop_back(  );
+    if ( m_scopes.empty(  ) ) throw RuntimeError( "No scopes to exit." );
 
-    nx_register = scope.start_reg;
+    const auto scope_start_reg { m_scopes.back(  ).get_start_register(  ) };
+    m_scopes.pop_back(  );
+
+    m_next_register = scope_start_reg;
+}
+
+std::optional< std::uint8_t > Compiler::find_variable( std::string_view name ) const
+{
+    for ( auto iter { m_scopes.rbegin(  ) }; iter != m_scopes.rend(); ++iter )
+    {
+        if ( const auto reg { iter->find( name ) } ) return reg;
+    }
+
+    return std::nullopt;
+}
+
+std::uint8_t Compiler::alloc_register( )
+{
+    if ( m_next_register >= 255 ) throw RuntimeError( "Register exhaustion" );
+    return m_next_register++;
+}
+
+std::uint8_t Compiler::add_to_pool( const std::string &str )
+{
+    /* Simply return any existing strings in the pool, simple. */
+    for ( auto idx { 0 }; idx < m_string_pool.size(  ); idx++ )
+    {
+        if ( m_string_pool[ idx ] == str ) return idx;
+    }
+
+    if ( m_string_pool.size(  ) >= 255 ) throw RuntimeError( "String pool exhaustion" );
+
+    m_string_pool.push_back( str );
+    return m_string_pool.size(  ) - 1;
 }
 
 void Compiler::comp_statement( const Statement &stmt )
 {
-    /// Downcast the Statement into an ExpressionStatement
-
-    if ( const auto *expr_stmt { dynamic_cast< const ExpressionStatement * >( &stmt ) } )
+    if ( const auto* e { dynamic_cast< const ExpressionStatement* >( &stmt ) } )
     {
-        /// Get the Expression of the ExpressionStatement.
-        const Expression* expr { expr_stmt->get_expression(  ) };
-        /// Compile the expression.
-        comp_expression( expr );
-    } else if ( const auto *var_stmt { dynamic_cast< const VariableDeclaration * >( &stmt) })
+        comp_expr_stmt( *e );
+    }
+    else if ( const auto* v { dynamic_cast< const VariableDeclaration* >( &stmt ) } )
     {
-        if (scopes.empty(  )) throw std::runtime_error("[juno::compile_error] Somehow, there are no scopes left.");
-
-        /// For now, we'll comptime a binary expression.
-        std::uint8_t var_reg { 0 };
-        if ( var_stmt->is_comptime( ) )
-        {
-            if ( const auto *bin { dynamic_cast< const BinaryExpression* >( var_stmt->get_value( ).get(  ) ) } )
-            {
-                eval_visitor.visit( *bin );
-                const Number result { eval_visitor.get_result(  )  };
-                var_reg = comp_expression( &result );
-            }
-        } else
-        {
-            var_reg = comp_expression( var_stmt->get_value( ).get( ) );
-        }
-
-        scopes.back(  ).variables[ var_stmt->get_name(  ) ] = var_reg;
-    } else if ( const auto *block_stmt { dynamic_cast< const BlockStmt * >( &stmt ) } )
+        comp_var_decl_stmt( *v );
+    }
+    else if ( const auto* b { dynamic_cast< const BlockStmt* >( &stmt ) } )
     {
-        if ( block_stmt->is_profiled(  ) ) emit( jnvm::inst::Instruction( jnvm::inst::Opcode::PRF ) );
-        enter_scope(  );
-        for ( const auto& s : block_stmt->get_body( ) )
-            comp_statement( *s );
-        exit_scope(  );
-        if ( block_stmt->is_profiled(  ) ) emit( jnvm::inst::Instruction( jnvm::inst::Opcode::PRFE ) );
-    } else if ( const auto *proto { dynamic_cast< const FunctionPrototype * >( &stmt ) } )
+        comp_block_stmt( *b );
+    }
+    else if ( const auto* r { dynamic_cast< const ReturnStatement* >( &stmt ) } )
     {
-    } else if ( const auto *ret { dynamic_cast< const ReturnStatement* >( &stmt ) })
+        comp_ret_stmt( *r );
+    }
+    else if ( dynamic_cast< const FunctionPrototype* >( &stmt ) )
     {
-        if ( ret->has_value(  ) )
-        {
-            /// Compile the value
-            const auto result_reg { comp_expression( ret->get_value(  ).get(  ) ) };
-            /// We now need to move the result to the fp register
-            if ( result_reg != 0 ) /// 0 is the expected fp register
-            {
-                emit( jnvm::inst::Instruction( jnvm::inst::Opcode::MOVR, 0, result_reg ) );
-            }
-        }
-
-        emit( jnvm::inst::Instruction( jnvm::inst::Opcode::RET ));
     }
     else
     {
-        throw std::runtime_error("[juno::compile_error] unknown statement type.");
+        throw RuntimeError("Unknown statement type");
     }
+}
+
+void Compiler::comp_expr_stmt( const ExpressionStatement &stmt )
+{
+    comp_expression( stmt.get_expression(  ) );
+}
+
+void Compiler::comp_var_decl_stmt( const VariableDeclaration &var_decl )
+{
+    if ( m_scopes.empty(  ) ) throw RuntimeError( "Somehow, variable declaration is outside scope" );
+
+    std::uint8_t var_register;
+    if ( var_decl.is_comptime(  ) )
+    {
+        if ( auto reg { try_comptime( var_decl.get_value(  ).get(  ) ) } )
+        {
+            var_register = *reg;
+        }
+        else
+        {
+            var_register = comp_expression( var_decl.get_value(  ).get(  ) );
+        }
+    } else
+    {
+        var_register = comp_expression( var_decl.get_value(  ).get(  ) );
+    }
+
+    /* Bind the variable to the current scope */
+    m_scopes.back(  ).declare( var_decl.get_name(  ), var_register );
+}
+
+void Compiler::comp_block_stmt( const BlockStmt &block )
+{
+    /* If the block is prefixed with @profile, emit it */
+    if ( block.is_profiled(  ) ) emit( jnvm::inst::Instruction(jnvm::inst::Opcode::PRF) );
+
+    enter_scope(  );
+    for ( const auto& stmt : block.get_body(  ) )
+        comp_statement( *stmt );
+    exit_scope(  );
+
+    if ( block.is_profiled(  ) ) emit( jnvm::inst::Instruction(jnvm::inst::Opcode::PRFE) );
+}
+
+void Compiler::comp_ret_stmt( const ReturnStatement &ret )
+{
+    if ( ret.has_value(  ) )
+    {
+        if ( const auto result_register { comp_expression( ret.get_value( ).get( ) ) }; result_register != 0 )
+        {
+            emit( jnvm::inst::Instruction( jnvm::inst::Opcode::COPY, 0, result_register ) );
+        }
+    }
+
+    emit( jnvm::inst::Instruction( jnvm::inst::Opcode::RET ) );
+}
+
+void Compiler::comp_proto_stmt( const FunctionPrototype &proto )
+{
+    /* We need to save the next register state for compiling protos */
+    const auto saved { save_register(  ) };
+    restore_register( 0 );
+
+    enter_scope(  );
+
+    /*
+     * Refactor message:
+     *
+     * I totally forgot to this in the older version,
+     * i forgot to declare the params in the scope of
+     * the prototypes body, but here i have done it so
+     * using params in bodies work!
+     *
+     */
+    for ( const auto& param : proto.get_params(  ) )
+    {
+        const auto param_register { alloc_register(  ) };
+        m_scopes.back(  ).declare( param.name, param_register );
+    }
+
+    comp_statement( *proto.get_body(  ) );
+
+    /* protos must always return! */
+    if ( m_bytecode.empty(  ) || jnvm::inst::Instruction( m_bytecode.back(  ) ).opcode(  ) != jnvm::inst::Opcode::RET )
+        emit( jnvm::inst::Instruction( jnvm::inst::Opcode::RET ) );
+
+    exit_scope(  );
+    restore_register( saved );
 }
 
 std::uint8_t Compiler::comp_expression( const Expression *expr )
 {
-    /// If the expression is a Number, emit it's value to the bytecode.
-    /// And allocate it to a register.
-    if ( const auto* n { dynamic_cast< const Number* >( expr ) } )
-    {
-        const auto reg { nx_register++ };
+    if ( !expr ) throw RuntimeError( "Null expression" );
 
-        emit( jnvm::inst::Instruction(
-            jnvm::inst::Opcode::MOV,
-            reg,
-            static_cast< std::uint8_t >( n->get_value(  ) )
-        ) );
+    if ( const auto* n { dynamic_cast< const Number* >( expr ) } ) return comp_number( *n );
+    if ( const auto* s { dynamic_cast< const String* >( expr ) } ) return comp_string( *s );
+    if ( const auto* i { dynamic_cast< const IdentifierLit* >( expr ) } ) return comp_identifier( *i );
+    if ( const auto* b { dynamic_cast< const BinaryExpression* >( expr ) } ) return comp_binary_expr( *b );
+    if ( const auto* c { dynamic_cast< const CallExpression* >( expr ) } ) return comp_call( *c );
 
-        std::println("Number reg = {}", reg);
-
-        return reg;
-    }
-
-    /// If the expression is an IndentifierLiteral, assume it's referring to a variable
-    /// so search through all scopes until it's found.
-    if ( const auto* id { dynamic_cast< const IdentifierLit* >( expr )})
-    {
-        for ( auto& s : scopes )
-            if ( s.variables.contains( id->get_value(  ) ) )
-                return s.variables[ id->get_value(  ) ];
-    }
-
-    /// If the expression is a BinaryExpression, emit it's structure to the bytecode.
-    if ( const auto* bin { dynamic_cast< const BinaryExpression* >( expr ) } )
-    {
-        /// Compile LHS and RHS of the expression
-        const auto lhs_register { comp_expression( bin->get_lhs(  ).get(  ) ) };
-        const auto rhs_register { comp_expression( bin->get_rhs(  ).get(  ) ) };
-        const auto result_register { nx_register++ };
-
-        std::println("at binary expr");
-
-        jnvm::inst::Opcode operation;
-        switch ( bin->get_op(  ).op )
-        {
-            case BinaryOp::ADD: operation = jnvm::inst::Opcode::ADD; break;
-            case BinaryOp::SUB: operation = jnvm::inst::Opcode::SUB; break;
-            case BinaryOp::MUL: operation = jnvm::inst::Opcode::MUL; break;
-            case BinaryOp::DIV: operation = jnvm::inst::Opcode::DIV; break;
-            default: throw std::runtime_error( "[juno::compile_error] unknown binary operator used." );
-        }
-
-        /// Emit the instruction.
-        emit( jnvm::inst::Instruction(
-            operation,
-            lhs_register,
-            rhs_register,
-            result_register
-        ) );
-
-        return result_register;
-    }
-
-    /// If the expression is a CallExpression, emit it's structure to the bytecode.
-    /// For now, we'll directly call natives
-    if ( const auto* call { dynamic_cast< const CallExpression* >( expr ) })
-    {
-        const auto& args { call->get_args(  ) };
-        const auto& callee { call->get_callee(  ) };
-        const auto arg_count { args.size(  ) };
-
-        std::uint8_t first_reg { 0 };
-        if ( arg_count == 0 ) first_reg = nx_register++;
-        else
-        {
-            first_reg = comp_expression( args[ 0 ].get( ) );
-            for ( int idx { 1 }; idx < arg_count; idx++ )
-                comp_expression( args[ idx ].get( ) );
-        }
-
-        if ( function_addrs.contains( callee ) )
-        {
-            emit(jnvm::inst::Instruction(
-                jnvm::inst::Opcode::CALL,
-                static_cast< std::uint8_t >( function_addrs[ callee ] ),
-                first_reg,
-                arg_count
-            ));
-
-            return first_reg;
-        }
-
-        if ( native_map.contains( callee ) )
-        {
-            emit(jnvm::inst::Instruction(
-                jnvm::inst::Opcode::CALL,
-                static_cast< std::uint8_t >( native_map[ callee ] ),
-                first_reg,
-                arg_count
-            ));
-
-            return first_reg;
-        }
-
-        throw std::runtime_error( std::format( "[juno::compile_error] unknown function '{}'", callee ) );
-    }
-
-    throw std::runtime_error( "[juno::compile_error] unknown expression type." );
+    throw RuntimeError( "Unknown expression type" );
 }
 
-void Compiler::comp_prototype( const FunctionPrototype &proto )
+std::uint8_t Compiler::comp_number( const Number &num )
 {
-    /// The start address of the function is the size of the bytecode
-    function_addrs[ std::string( proto.get_name(  ) ) ] = bytecode.size(  );
-    /// Save reg state
-    const auto saved_reg { nx_register };
-    nx_register = 0;
-    /// Set up the frame, prologue
-    enter_scope(  );
-    /// Allocate space for params
-    for ( const auto& p : proto.get_params(  ) )
-        scopes.back(  ).variables[ p.name ] = nx_register++;
-    /// Compile func body block
-    comp_statement( *proto.get_body(  ) );
-    exit_scope(  );
-    nx_register = saved_reg;
+    const auto n_register { alloc_register(  ) };
+    emit( jnvm::inst::Instruction(
+        jnvm::inst::Opcode::MOV,
+        n_register,
+        static_cast< std::uint8_t >( num.get_value(  ) )
+    ));
+    return n_register;
+}
+
+std::uint8_t Compiler::comp_string( const String &str )
+{
+    const auto n_register { alloc_register(  ) };
+    const auto str_idx { add_to_pool( str.get_value(  ) ) };
+    emit( jnvm::inst::Instruction(
+        jnvm::inst::Opcode::LOADS,
+        n_register,
+        str_idx
+    ));
+    return n_register;
+}
+
+std::uint8_t Compiler::comp_identifier( const IdentifierLit &id ) const
+{
+    /* Identifier = referring to a variable */
+    if ( auto n_reg { find_variable( id.get_value(  ) ) } )
+        return *n_reg;
+
+    throw RuntimeError( std::format( "Undefined variable '{}'", id.get_value(  ) ) );
+}
+
+std::uint8_t Compiler::comp_binary_expr( const BinaryExpression &bin )
+{
+    const auto lhs { comp_expression( bin.get_lhs(  ).get(  ) ) };
+    const auto rhs { comp_expression( bin.get_rhs(  ).get(  ) ) };
+    const auto res_reg { alloc_register(  ) };
+    const auto opcode { binop_to_opcode( bin.get_op(  ).op ) };
+    emit( jnvm::inst::Instruction( opcode, lhs, rhs, res_reg ) );
+    return res_reg;
+}
+
+std::uint8_t Compiler::comp_call( const CallExpression &call )
+{
+    const auto& args { call.get_args(  ) };
+    const auto& callee { call.get_callee(  ) };
+    const auto arg_count { args.size(  ) };
+
+    /*
+     *
+     * We need to define the first register because we have a base
+     * register which the function needs to resolve the arguments.
+     *
+     */
+    std::uint8_t first_reg;
+    if ( arg_count == 0 ) first_reg = alloc_register(  );
+    else
+    {
+        first_reg = comp_expression( args[ 0 ].get(  ) );
+        for ( auto idx { 1 }; idx < args.size(  ); ++idx )
+        {
+            const auto reg { comp_expression( args[ idx ].get(  ) ) };
+
+            if ( const auto need_consecutive_reg { first_reg + idx }; reg != need_consecutive_reg )
+            {
+                emit( jnvm::inst::Instruction( jnvm::inst::Opcode::COPY, need_consecutive_reg, reg ));
+                alloc_register(  );
+            }
+        }
+    }
+
+    std::uint8_t fn_addr;
+    if ( m_functions.contains( callee ) )
+    {
+        /* user defined are masked to lower bytes! */
+        fn_addr = static_cast< std::uint8_t >( m_functions[ callee ] & 0xFF );
+    }
+    else if ( m_natives_map.contains( callee ) )
+    {
+        fn_addr = static_cast< std::uint8_t >( m_natives_map.at( callee ) );
+    }
+    else
+    {
+        throw RuntimeError( std::format( "Unknown function '{}'", callee ) );
+    }
+
+    emit( jnvm::inst::Instruction(
+        jnvm::inst::Opcode::CALL,
+        fn_addr,
+        first_reg,
+        arg_count
+    ) );
+
+    return first_reg;
+}
+
+std::optional< std::uint8_t > Compiler::try_comptime( const Expression *expr )
+{
+    /* attempt the comptime evaluation for binary expressions */
+    if ( const auto* bin { dynamic_cast< const BinaryExpression* >( expr ) })
+    {
+        try
+        {
+            m_eval_visitor.visit( *bin );
+            const Number result { m_eval_visitor.get_result(  ) };
+            return comp_number( result );
+        }
+        catch (...)
+        {
+            return std::nullopt;
+        }
+    }
+
+    return std::nullopt;
+}
+
+jnvm::inst::Opcode Compiler::binop_to_opcode( const BinaryOp::Type op )
+{
+    switch (op)
+    {
+        case BinaryOp::ADD: return jnvm::inst::Opcode::ADD;
+        case BinaryOp::SUB: return jnvm::inst::Opcode::SUB;
+        case BinaryOp::MUL: return jnvm::inst::Opcode::MUL;
+        case BinaryOp::DIV: return jnvm::inst::Opcode::DIV;
+        default: throw RuntimeError( "Unknown binary operator" );
+    }
 }

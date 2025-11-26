@@ -33,6 +33,23 @@ let z = 20;
 Juno has a global scope like the large majority of programming languages, each scope in Juno has a predefined start register for any variables declared in that scope. When the compiler leaves the scope, the compiler which take note of the exiting of the scope and overwrite these registers as they're no longer in use. This is one way Juno cleans up variables.
 
 ```
+let name = "blinx";
+print("hello", name);
+```
+
+Juno has native functions such as print, and strings of course.
+
+```
+fn adder(a: double, b: double) -> double {
+    return a + b;
+}
+
+print(adder(10, 50));
+```
+
+Juno also allows you to define your own functions, the type hinting will be explained below.
+
+```
 @profile {
     let x = 234 * 34562;
     let y = x / 23;

@@ -52,14 +52,37 @@ std::vector<token::Token> lexer::Lexer::tokenize()
                 token_type = token_keywords_map.at( value );
             }
 
-            std::println("VALUE={}", value);
-
             tokens.emplace_back(
                 token_type,
                 value,
                 line,
                 start_col
             );
+        } else if ( current == '"' ) {
+            advance(  );
+            const std::size_t start { pos };
+            std::size_t start_col { col };
+            while ( pos < source.size(  ) && source[ pos ] != '"' )
+            {
+                if ( source[ pos ] == '\n' ) { ++line; col = 0; }
+                advance(  );
+            }
+
+            if ( pos >= source.size( ) ) {
+                throw std::runtime_error(
+                    "[juno::error] Unterminated string at line " +
+                    std::to_string(line)
+                );
+            }
+
+            tokens.emplace_back(
+                token::TokenType::STRING,
+                std::string { source.substr( start, pos - start ) },
+                line,
+                start_col
+            );
+
+            advance(  );
         } else if ( std::isdigit( current ) ) /// Process multiple numerical characters as a digit
         {
             const std::size_t start { pos };
@@ -90,7 +113,12 @@ std::vector<token::Token> lexer::Lexer::tokenize()
         }
     }
 
-    tokens.emplace_back(token::TokenType::END_OF_FILE, std::string(""), line, col);
+    tokens.emplace_back(
+        token::TokenType::END_OF_FILE,
+        std::string(),
+        line,
+        col
+    );
 
     return tokens;
 }

@@ -9,421 +9,349 @@
 #include <iostream>
 #include <print>
 #include <span>
-#include <stack>
 #include <stdexcept>
+#include <unordered_map>
 #include <vector>
+
+#ifdef __ANDROID__
+#include <android/log.h>
+#define LOG_TAG "jnvm"
+#define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, LOG_TAG, __VA_ARGS__)
+#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
+#else
+#define LOGD(...) std::println(__VA_ARGS__)
+#define LOGE(...) std::println(stderr, __VA_ARGS__)
+#endif
 
 namespace jnvm::machine
 {
     using namespace jnvm::inst;
 
-    constexpr std::size_t REGISTER_COUNT { 256 };
-    constexpr std::size_t MAX_CALL_DEPTH { 1024 };
+    constexpr std::size_t REG_CNT { 256 };
+    constexpr std::size_t MAX_DEPTH { 1024 };
 
-    /*
-     * Refactor message:
-     *
-     * I noticed I did not implement proper error handling before
-     * so I've decided to implement a RuntimeError class.
-     *
-     */
     class RuntimeError final : public std::runtime_error
     {
     public:
-        explicit RuntimeError( const std::string& msg )
-            : std::runtime_error { std::format( "[jnvm::runtime_error] {}", msg ) }
+        explicit RuntimeError( const char* msg )
+            : std::runtime_error { msg }
         {}
     };
 
-    ///@brief This structure represents a stack frame which is essential for tracking function calls.
-    struct StackFrame
+    struct Frame
     {
-        ///@brief Where the machine should return to after calling
-        std::size_t return_addr;
-        ///@brief The base register for the frames local variables
-        std::uint8_t frame_ptr;
-        ///@brief The amount of parameters passed.
-        std::uint8_t param_count;
-        ///@brief The register to which the result will be stored in.
-        std::uint8_t result_reg;
-        ///@brief An array of registers which the frame must save
-        std::array< std::uint32_t, REGISTER_COUNT > saved_regs { };
+        std::size_t ret_addr;
+        uint8_t fp;
+        uint8_t param_cnt;
+        uint8_t res_reg;
+        std::array<uint32_t, REG_CNT> regs { };
 
-        StackFrame(
-            const std::size_t return_addr,
-            const std::uint8_t frame_ptr,
-            const std::uint8_t param_count,
-            const std::uint8_t result_reg,
-            const std::array< std::uint32_t, REGISTER_COUNT > &saved_regs
-        ) :
-            return_addr { return_addr },
-            frame_ptr { frame_ptr },
-            param_count { param_count },
-            result_reg { result_reg },
-            saved_regs { saved_regs }
+        Frame( std::size_t ret, uint8_t fp_, uint8_t params, uint8_t res, const std::array<uint32_t, REG_CNT>& r )
+            : ret_addr( ret ), fp( fp_ ), param_cnt( params ), res_reg( res ), regs( r )
         {}
     };
 
-    /// First Argument: registers
-    /// Second Argument: base_reg
-    /// Third Argument: arg_count
-    /// Fourth Argument: string_pool
-    using VMNative = std::function< void(
-        std::array< std::uint32_t, REGISTER_COUNT >&,
-        std::uint32_t,
-        std::uint8_t,
-        const std::vector< std::string >&
-    ) >;
+    using VMNative = std::function<void(
+        std::array<uint32_t, REG_CNT>&,
+        uint32_t,
+        uint8_t,
+        const std::vector<std::string>&
+    )>;
 
     class Machine
     {
     public:
-        explicit Machine()
+        explicit Machine( bool dbg = false ) : m_dbg( dbg )
         {
-            load_natives(  );
+            init_natives( );
         }
 
-        explicit Machine( const bool debug ) : m_dbg { debug }
+        void load( const std::vector<uint32_t>& bc )
         {
-            load_natives(  );
+            m_bc = bc;
+            reset( );
         }
 
-        ///@brief Load a new program into the machine.
-        ///@details Clears all registers and resets the program counter, and the call stack.
-        void load( const std::vector< std::uint32_t > &_bytecode )
+        void load_strs( const std::vector<std::string>& strs )
         {
-            m_bytecode = _bytecode;
-            reset(  );
+            m_strs = strs;
         }
 
-        ///@brief Load a vector of strings to the string pool in the machine.
-        void load_strings( const std::vector< std::string >& string_pool_ )
+        void reg_native( VMNativeID id, VMNative fn )
         {
-            m_string_pool = string_pool_;
+            m_natives[ id ] = std::move( fn );
         }
 
-        ///@brief Register a native function into the virtual machine
-        void register_native( const VMNativeID id, VMNative func )
-        {
-            m_natives[ id ] = std::move( func );
-        }
-
-        ///@brief Execute the bytecode.
-        ///@return The result of the first register.
         [[nodiscard]]
-        std::uint32_t execute( )
+        uint32_t exec( )
         {
-            if ( m_bytecode.empty(  ) ) throw RuntimeError( "No bytecode to execute." );
+            if ( m_bc.empty( ) ) throw RuntimeError( "no bytecode" );
 
-            while ( m_pc < m_bytecode.size(  ) )
+            while ( m_pc < m_bc.size( ) )
             {
-                execute_one(  );
-                if ( m_halted )
+                exec_one( );
+                if ( m_halt )
                 {
-                    if ( m_dbg ) std::println("Registers: {}", m_registers);
-
-                    return m_registers[ 0 ];
-                };
+                    if ( m_dbg ) LOGD( "regs: final state" );
+                    return m_regs[ 0 ];
+                }
             }
 
-            throw RuntimeError( "Program was aborted without a HLT instruction, please check your compiler." );
+            throw RuntimeError( "no hlt instruction" );
         }
 
     private:
-        std::array< std::uint32_t, REGISTER_COUNT > m_registers { };
-        std::vector< std::uint32_t > m_bytecode;
-        std::vector< std::string > m_string_pool;
-        std::size_t m_pc { 0 };     /// Program counter
-        std::size_t m_fp { 0 };     /// Frame pointer
-        bool m_halted { false };
+        std::array<uint32_t, REG_CNT> m_regs { };
+        std::vector<uint32_t> m_bc;
+        std::vector<std::string> m_strs;
+        std::size_t m_pc { 0 };
+        std::size_t m_fp { 0 };
+        bool m_halt { false };
         bool m_dbg { false };
 
-        std::stack< StackFrame > m_call_stack;
-        std::unordered_map< VMNativeID, VMNative > m_natives;
+        std::vector<Frame> m_stk;
+        std::unordered_map<VMNativeID, VMNative> m_natives;
 
-        std::chrono::steady_clock::time_point m_profile_start;
-        std::size_t m_profile_instructions_count { 0 };
+        std::chrono::steady_clock::time_point m_prof_start;
+        std::size_t m_inst_cnt { 0 };
 
-        void reset()
+        void reset( )
         {
-            m_registers.fill(  0 );
+            m_regs.fill( 0 );
             m_pc = 0;
             m_fp = 0;
-            m_halted = false;
-            m_profile_instructions_count = 0;
-
-            while ( !m_call_stack.empty(  ) ) m_call_stack.pop(  );
+            m_halt = false;
+            m_inst_cnt = 0;
+            m_stk.clear( );
+            m_stk.reserve( MAX_DEPTH );
         }
 
-        ///@brief Will execute the move instruction
-        ///@details Move the immediate value (operand 2) into the register (operand 1)
-        void execute_mov( const Instruction instruction )
+        inline void mov( const Instruction i )
         {
-            m_registers[ instruction.op1(  ) ] = instruction.op2(  );
+            m_regs[ i.op1( ) ] = i.op2( );
         }
 
-        ///@brief Will execute the copy instruction.
-        ///@details Copy the value of a source register (operand 2) into a target register (operand 1)
-        void execute_copy( const Instruction instruction )
+        inline void copy( const Instruction i )
         {
-            m_registers[ instruction.op1() ] = m_registers[ instruction.op2(  ) ];
+            m_regs[ i.op1( ) ] = m_regs[ i.op2( ) ];
         }
 
-        ///@brief Will execute the load string instruction.
-        ///@details Will check if the index (operand 1) of the string exceeds the string pool size
-        ///if it does it'll error, else it'll mark the index with a flag and place it into
-        ///the register (operand 1)
-        void execute_loads( const Instruction instruction )
+        inline void loads( const Instruction i )
         {
-            const auto str_idx { instruction.op2( ) };
-            if ( str_idx >= m_string_pool.size(  ) ) throw RuntimeError( "String pool index is out of bounds.");
-
-            m_registers[ instruction.op1( ) ] = make_idx_for_string( str_idx );
+            const auto idx { i.op2( ) };
+            if ( idx >= m_strs.size( ) ) throw RuntimeError( "str idx oob" );
+            m_regs[ i.op1( ) ] = make_idx_for_string( idx );
         }
 
-        ///@brief Will execute the add instruction.
-        ///@details Add the value of register one (operand 1) and register two (operand 2) and place
-        ///the result in register three (operand 3)
-        void execute_add( const Instruction instruction )
+        inline void add( const Instruction i )
         {
-            m_registers[ instruction.op3( ) ] = m_registers[ instruction.op1( ) ] + m_registers[ instruction.op2( ) ];
+            m_regs[ i.op3( ) ] = m_regs[ i.op1( ) ] + m_regs[ i.op2( ) ];
         }
 
-        ///@brief Will execute the subtract instruction.
-        ///@details Subtract the value of register one (operand 1) and register two (operand 2) and place
-        ///the result in register three (operand 3)
-        void execute_sub( const Instruction instruction )
+        inline void sub( const Instruction i )
         {
-            m_registers[ instruction.op3( ) ] = m_registers[ instruction.op1( ) ] - m_registers[ instruction.op2( ) ];
+            m_regs[ i.op3( ) ] = m_regs[ i.op1( ) ] - m_regs[ i.op2( ) ];
         }
 
-        ///@brief Will execute the multiply instruction.
-        ///@details Multiply the value of register one (operand 1) and register two (operand 2) and place
-        ///the result in register three (operand 3)
-        void execute_mul( const Instruction instruction )
+        inline void mul( const Instruction i )
         {
-            m_registers[ instruction.op3( ) ] = m_registers[ instruction.op1( ) ] * m_registers[ instruction.op2( ) ];
+            m_regs[ i.op3( ) ] = m_regs[ i.op1( ) ] * m_regs[ i.op2( ) ];
         }
 
-        ///@brief Will execute the divide instruction.
-        ///@details Divide the value of register one (operand 1) and register two (operand 2) and place
-        ///the result in register three (operand 3)
-        void execute_div( const Instruction instruction )
+        inline void div( const Instruction i )
         {
-            const auto rhs { m_registers[ instruction.op2(  ) ] };
-            if ( rhs == 0 ) throw RuntimeError( "Division by zero." );
-            m_registers[ instruction.op3( ) ] = m_registers[ instruction.op1( ) ] / rhs;
+            const auto rhs { m_regs[ i.op2( ) ] };
+            if ( rhs == 0 ) throw RuntimeError( "div by zero" );
+            m_regs[ i.op3( ) ] = m_regs[ i.op1( ) ] / rhs;
         }
 
-        ///@brief Will execute the increment instruction.
-        ///@details Increment the register's (operand 1) value.
-        void execute_inc( const Instruction instruction )
+        inline void inc( const Instruction i )
         {
-            m_registers[ instruction.op1(  ) ]++;
+            ++m_regs[ i.op1( ) ];
         }
 
-        ///@brief Will execute the unconditional jump instruction.
-        ///@details Set the program counter value to the jump instructions desired place / address.
-        void execute_jmp( const Instruction instruction )
+        inline void jmp( const Instruction i )
         {
-            m_pc = instruction.op1( );
+            m_pc = i.op1( );
         }
 
-        ///@brief Will execute the jump-if-not-zero instruction.
-        ///@details Set the program counter value to the jump-if-not-zero instructions desired place / address.
-        void execute_jnz( const Instruction instruction )
+        inline void jnz( const Instruction i )
         {
-            if ( m_registers[ instruction.op1(  ) ] != 0 ) m_pc = instruction.op2(  );
-            else m_pc++;
+            m_pc = m_regs[ i.op1( ) ] != 0 ? i.op2( ) : m_pc + 1;
         }
 
-        ///@brief Executes a VM native function
-        void execute_vm_native( std::uint8_t addr, const std::uint8_t base_reg, const std::uint8_t arg_count )
+        inline void jz( const Instruction i )
         {
-            const auto fn { static_cast< VMNativeID >( addr ) };
-            if ( !m_natives.contains( fn ) ) throw RuntimeError( "Unknown native function." );
-
-            m_natives[ fn ]( m_registers, base_reg, arg_count, m_string_pool );
+            m_pc = m_regs[ i.op1( ) ] == 0 ? i.op2( ) : m_pc + 1;
         }
 
-        ///@brief Executes a user defined function
-        void execute_user_func( const std::uint8_t addr, std::uint8_t base_reg, std::uint8_t arg_count )
+        inline void eq( const Instruction i )
         {
-            if ( m_call_stack.size(  ) >= MAX_CALL_DEPTH ) throw RuntimeError( "Call stack overflow." );
+            m_regs[ i.op3( ) ] = m_regs[ i.op1( ) ] == m_regs[ i.op2( ) ];
+        }
 
-            /* Save state */
-            m_call_stack.emplace( m_pc + 1, m_fp, arg_count, base_reg, m_registers );
-            /* Setup */
-            m_fp = base_reg;
+        inline void neq( const Instruction i )
+        {
+            m_regs[ i.op3( ) ] = m_regs[ i.op1( ) ] != m_regs[ i.op2( ) ];
+        }
+
+        inline void lt( const Instruction i )
+        {
+            m_regs[ i.op3( ) ] = m_regs[ i.op1( ) ] < m_regs[ i.op2( ) ];
+        }
+
+        inline void gt( const Instruction i )
+        {
+            m_regs[ i.op3( ) ] = m_regs[ i.op1( ) ] > m_regs[ i.op2( ) ];
+        }
+
+        inline void lte( const Instruction i )
+        {
+            m_regs[ i.op3( ) ] = m_regs[ i.op1( ) ] <= m_regs[ i.op2( ) ];
+        }
+
+        inline void gte( const Instruction i )
+        {
+            m_regs[ i.op3( ) ] = m_regs[ i.op1( ) ] >= m_regs[ i.op2( ) ];
+        }
+
+        void exec_native( uint8_t addr, uint8_t base, uint8_t argc )
+        {
+            const auto fn { static_cast<VMNativeID>( addr ) };
+            auto it { m_natives.find( fn ) };
+            if ( it == m_natives.end( ) ) throw RuntimeError( "unknown native" );
+            it->second( m_regs, base, argc, m_strs );
+        }
+
+        void exec_usr( uint8_t addr, uint8_t base, uint8_t argc )
+        {
+            if ( m_stk.size( ) >= MAX_DEPTH ) throw RuntimeError( "stk overflow" );
+            m_stk.emplace_back( m_pc + 1, m_fp, argc, base, m_regs );
+            m_fp = base;
             m_pc = addr;
         }
 
-        ///@brief Will execute the call instruction.
-        /// First Operand: the functions address
-        /// Second Operand: the start register for the arguments
-        /// Third Operand: the amount of arguments
-        void execute_call( const Instruction instruction )
+        void call( const Instruction i )
         {
-            const auto addr { instruction.op1(  ) };
-            const auto base_reg { instruction.op2(  ) };
-            const auto arg_count { instruction.op3(  ) };
+            const auto addr { i.op1( ) };
+            const auto base { i.op2( ) };
+            const auto argc { i.op3( ) };
 
-            /* Check if the function address maps to a VM native function */
             if ( is_vm_native( addr ) )
             {
-                execute_vm_native( addr, base_reg, arg_count );
-                m_pc++;
-            } else
+                exec_native( addr, base, argc );
+                ++m_pc;
+            }
+            else
             {
-                execute_user_func( addr, base_reg, arg_count );
+                exec_usr( addr, base, argc );
             }
         }
 
-        ///@brief Will execute the return instruction.
-        ///If RET is called from the main program, it'll be halted.
-        ///Else
-        ///The value in the first register is for the return value,
-        ///so it'll be saved, then the VM will restore the caller state,
-        ///which includes resetting the registers that were saved, the program counter
-        ///and the frame pointer, and the first register (reg 0) will be restored, and
-        ///the call stack will be popped.
-        void execute_ret( const Instruction instruction )
+        void ret( const Instruction i )
         {
-            /* This is the first check in the return instruction */
-            if ( m_call_stack.empty(  ) ) { m_halted = true; return; }
-
-            /* Save the value in register zero, it will be restored */
-            const auto saved_value { m_registers[ 0 ] };
-
-            /* Restore */
-            const auto& f { m_call_stack.top(  ) }; /// Top stack frame
-            m_registers = f.saved_regs;
-            m_pc = f.return_addr;
-            m_fp = f.frame_ptr;
-
-            m_registers[ f.result_reg ] = saved_value;
-            m_call_stack.pop(  );
-        }
-
-        ///@brief Will execute the profile instruction
-        ///Will be started with a steady clock of ::now( )
-        void execute_prf( const Instruction instruction )
-        {
-            m_profile_start = std::chrono::steady_clock::now(  );
-        }
-
-        ///@brief Will execute the profile end instruction
-        ///Will automatically print the amount of instructions executed.
-        void execute_prfe( const Instruction instruction )
-        {
-            const auto end { std::chrono::steady_clock::now(  ) };
-            const auto dur { std::chrono::duration_cast< std::chrono::milliseconds >( end - m_profile_start ) };
-            std::println("Block executed in {} (processed {} instructions)", dur, m_profile_instructions_count);
-        }
-
-        ///@brief Will execute the halt instruction
-        ///Simply sets the halted flag to true.
-        void execute_hlt( const Instruction instruction )
-        {
-            m_halted = true;
-        }
-
-        void execute_jz( const Instruction instruction )
-        {
-            if ( m_registers[ instruction.op1(  ) ] == 0 ) m_pc = instruction.op2(  );
-            else m_pc++;
-        }
-
-        void execute_eq( const Instruction instruction )
-        {
-            m_registers[ instruction.op3(  ) ] = ( m_registers[ instruction.op1(  ) ] == m_registers[ instruction.op2(  ) ] ) ? 1 : 0;
-        }
-
-        void execute_neq( const Instruction instruction )
-        {
-            m_registers[ instruction.op3(  ) ] = ( m_registers[ instruction.op1(  ) ] != m_registers[ instruction.op2(  ) ] ) ? 1 : 0;
-        }
-
-        void execute_lt( const Instruction instruction )
-        {
-            m_registers[ instruction.op3(  ) ] = ( m_registers[ instruction.op1(  ) ] < m_registers[ instruction.op2(  ) ] ) ? 1 : 0;
-        }
-
-        void execute_gt( const Instruction instruction )
-        {
-            m_registers[ instruction.op3(  ) ] = ( m_registers[ instruction.op1(  ) ] > m_registers[ instruction.op2(  ) ] ) ? 1 : 0;
-        }
-
-        void execute_lte( const Instruction instruction )
-        {
-            m_registers[ instruction.op3(  ) ] = ( m_registers[ instruction.op1(  ) ] <= m_registers[ instruction.op2(  ) ] ) ? 1 : 0;
-        }
-
-        void execute_gte( const Instruction instruction )
-        {
-            m_registers[ instruction.op3(  ) ] = ( m_registers[ instruction.op1(  ) ] >= m_registers[ instruction.op2(  ) ] ) ? 1 : 0;
-        }
-
-        ///@brief Execute a single instruction.
-        void execute_one()
-        {
-            /* Check if the program counter exceeds the bytecode capacity */
-            if ( m_pc >= m_bytecode.size(  ) ) throw RuntimeError( "Program counter is out of bounds." );
-
-            /* Encode the byte into an instruction */
-            const Instruction i { m_bytecode[ m_pc ] };
-
-            /* Increment the profiler instruction count */
-            m_profile_instructions_count++;
-
-            switch ( i.opcode(  ) )
+            if ( m_stk.empty( ) )
             {
-                case Opcode::MOV:   execute_mov( i );   m_pc++; break;
-                case Opcode::COPY:  execute_copy( i );  m_pc++; break;
-                case Opcode::LOADS: execute_loads( i ); m_pc++; break;
-                case Opcode::ADD:   execute_add( i );   m_pc++; break;
-                case Opcode::SUB:   execute_sub( i );   m_pc++; break;
-                case Opcode::MUL:   execute_mul( i );   m_pc++; break;
-                case Opcode::DIV:   execute_div( i );   m_pc++; break;
-                case Opcode::INC:   execute_inc( i );   m_pc++; break;
-                case Opcode::JMP:   execute_jmp( i );   break;
-                case Opcode::JNZ:   execute_jnz( i );   break;
-                case Opcode::JZ:    execute_jz(i);      break;
-                case Opcode::EQ:    execute_eq(i);      m_pc++; break;
-                case Opcode::NEQ:   execute_neq(i);     m_pc++; break;
-                case Opcode::LT:    execute_lt(i);      m_pc++; break;
-                case Opcode::GT:    execute_gt(i);      m_pc++; break;
-                case Opcode::LTE:   execute_lte(i);     m_pc++; break;
-                case Opcode::GTE:   execute_gte(i);     m_pc++; break;
-                case Opcode::CALL:  execute_call( i );  break;
-                case Opcode::RET:   execute_ret( i );   break;
-                case Opcode::PRF:   execute_prf( i );   m_pc++; break;
-                case Opcode::PRFE:  execute_prfe( i );  m_pc++; break;
-                case Opcode::HLT:   execute_hlt( i );   return;
-                default: throw RuntimeError("I have just encountered an unknown opcode...");
+                m_halt = true;
+                return;
+            }
+
+            const auto val { m_regs[ 0 ] };
+            const auto& f { m_stk.back( ) };
+            
+            m_regs = f.regs;
+            m_pc = f.ret_addr;
+            m_fp = f.fp;
+            m_regs[ f.res_reg ] = val;
+            
+            m_stk.pop_back( );
+        }
+
+        inline void prf( const Instruction i )
+        {
+            m_prof_start = std::chrono::steady_clock::now( );
+        }
+
+        void prfe( const Instruction i )
+        {
+            const auto end { std::chrono::steady_clock::now( ) };
+            const auto dur { std::chrono::duration_cast<std::chrono::milliseconds>( end - m_prof_start ) };
+            LOGD( "exec: %llums, insts: %zu", dur.count( ), m_inst_cnt );
+        }
+
+        inline void hlt( const Instruction i )
+        {
+            m_halt = true;
+        }
+
+        void exec_one( )
+        {
+            if ( m_pc >= m_bc.size( ) ) throw RuntimeError( "pc oob" );
+
+            const Instruction i { m_bc[ m_pc ] };
+            ++m_inst_cnt;
+
+            switch ( i.opcode( ) )
+            {
+                case Opcode::MOV:   mov( i );   ++m_pc; break;
+                case Opcode::COPY:  copy( i );  ++m_pc; break;
+                case Opcode::LOADS: loads( i ); ++m_pc; break;
+                case Opcode::ADD:   add( i );   ++m_pc; break;
+                case Opcode::SUB:   sub( i );   ++m_pc; break;
+                case Opcode::MUL:   mul( i );   ++m_pc; break;
+                case Opcode::DIV:   div( i );   ++m_pc; break;
+                case Opcode::INC:   inc( i );   ++m_pc; break;
+                case Opcode::JMP:   jmp( i );   break;
+                case Opcode::JNZ:   jnz( i );   break;
+                case Opcode::JZ:    jz( i );    break;
+                case Opcode::EQ:    eq( i );    ++m_pc; break;
+                case Opcode::NEQ:   neq( i );   ++m_pc; break;
+                case Opcode::LT:    lt( i );    ++m_pc; break;
+                case Opcode::GT:    gt( i );    ++m_pc; break;
+                case Opcode::LTE:   lte( i );   ++m_pc; break;
+                case Opcode::GTE:   gte( i );   ++m_pc; break;
+                case Opcode::CALL:  call( i );  break;
+                case Opcode::RET:   ret( i );   break;
+                case Opcode::PRF:   prf( i );   ++m_pc; break;
+                case Opcode::PRFE:  prfe( i );  ++m_pc; break;
+                case Opcode::HLT:   hlt( i );   return;
+                default: throw RuntimeError( "unknown opcode" );
             }
         }
 
-        ///@brief Register native functions
-        void load_natives( )
+        void init_natives( )
         {
-            register_native(
+            reg_native(
                 VMNativeID::PRINT,
-                []( auto& registers, const std::uint8_t base_reg, const std::uint8_t arg_count, const auto& string_pool )
+                []( auto& regs, uint32_t base, uint8_t argc, const auto& strs )
                 {
-                    for ( std::uint8_t offset { 0 }; offset < arg_count; offset++ )
+                    for ( uint8_t i { 0 }; i < argc; ++i )
                     {
-                        if ( const auto value { registers[ base_reg + offset ] }; is_string_value( value ) )
+                        const auto val { regs[ base + i ] };
+                        if ( is_string_value( val ) )
                         {
-                            const auto idx { get_string_idx( value ) };
-                            if ( idx < string_pool.size(  ) ) std::print("{} ", string_pool[ idx ]);
-                        } else
+                            const auto idx { get_string_idx( val ) };
+                            if ( idx < strs.size( ) )
+                            {
+#ifdef __ANDROID__
+                                LOGD( "%s ", strs[ idx ].c_str( ) );
+#else
+                                std::print( "{} ", strs[ idx ] );
+#endif
+                            }
+                        }
+                        else
                         {
-                            std::print("{} ", value );
+#ifdef __ANDROID__
+                            LOGD( "%u ", val );
+#else
+                            std::print( "{} ", val );
+#endif
                         }
                     }
-
+#ifndef __ANDROID__
                     std::cout << std::endl;
+#endif
                 }
             );
         }

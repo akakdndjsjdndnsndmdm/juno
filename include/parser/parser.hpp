@@ -26,6 +26,10 @@ namespace parser
         std::unique_ptr< Statement > parse_stmt();
         ///@brief Parse a variable declaration.
         std::unique_ptr< Statement > parse_var_decl();
+        ///@brief Parse an assignment to a variable.
+        std::unique_ptr< Statement > parse_assignment();
+        ///@brief Parse a compound assignment.
+        std::unique_ptr< Statement > parse_comp_assignment();
         ///@brief Parse an expression statement (a statement which wraps an expression).
         std::unique_ptr< Statement > parse_expr_stmt();
         ///@brief Parse a collection of statements into a block.
@@ -73,6 +77,10 @@ namespace parser
         ///@brief Check if the current token matches the type of the givenn type and consume.
         ///@return true if the token was matched.
         bool match( token::TokenType type );
+
+        ///@brief Check ahead in the parser to look at the next token
+        [[nodiscard]]
+        bool check_ahead( token::TokenType type ) const;
 
         ///@brief Helper function which creates a new BinaryOp struct if the current token is one.
         [[nodiscard]]

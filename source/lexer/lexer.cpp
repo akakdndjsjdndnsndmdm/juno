@@ -1,3 +1,4 @@
+#include <optional>
 #include <print>
 #include <lexer/lexer.hpp>
 
@@ -16,16 +17,9 @@ std::vector<token::Token> lexer::Lexer::tokenize()
         } else if ( current == '/' && peek_ahead(  ) && *peek_ahead(  ) == '/') {
             advance(  ); advance(  );
             while ( pos < source.size(  ) && source.at( pos ) != '\n' ) advance(  );
-        } else if ( current == '-' && *peek_ahead(  ) == '>' ) { /// Process arrow symbol
-            tokens.emplace_back(
-                token::ARROW,
-                std::string { "->" },
-                line,
-                col
-            );
-
-            advance(  );
-            advance(  );
+        } else if ( const auto token_value { try_compound( current, *peek_ahead(  ) ) }; peek_ahead(  ) && token_value.has_value(  ) )
+        {
+            tokens.emplace_back( token_value.value(  ) );
         } else if ( token_character_map.contains( current ) ) /// Process single character tokens such as + - * /
         {
             auto token_type { token_character_map.at( current ) };
@@ -37,7 +31,7 @@ std::vector<token::Token> lexer::Lexer::tokenize()
             );
 
             advance(  );
-        } else if ( std::isalpha( current ) || current == '@' ) /// Process multiple alphabetical characters as an identifier or keyword.
+        } else if ( std::isalpha( current ) || current == '_' || current == '@' ) /// Process multiple alphabetical characters as an identifier or keyword.
         {
             const std::size_t start { pos };
             std::size_t start_col { col };
@@ -140,4 +134,20 @@ void lexer::Lexer::advance()
 char *lexer::Lexer::peek_ahead( )
 {
     return &source.at( pos + 1 );
+}
+
+std::optional< token::Token > lexer::Lexer::try_compound( char first, char second )
+{
+    if ( pos + 1 >= source.size(  ) ) return std::nullopt;
+    if ( source[ pos + 1 ] != second ) return std::nullopt;
+
+    const std::string_view map_key { source.data(  ) + pos, 2 };
+    if ( const auto iter { token_compound_map.find( map_key ) }; iter != token_compound_map.end() )
+    {
+        token::Token token { iter->second, std::string { map_key }, line, col };
+        advance(  ); advance(  );
+        return token;
+    }
+
+    return std::nullopt;
 }

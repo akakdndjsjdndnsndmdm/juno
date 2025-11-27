@@ -30,7 +30,7 @@ std::int32_t main( )
             system_util::get_system_platform(  )
         );
 
-        const std::string test_path { "../../tests/function.jn" };
+        const std::string test_path { "../../tests/assignment.jn" };
 
         std::ifstream file { test_path };
         std::string line;
@@ -46,13 +46,16 @@ std::int32_t main( )
         auto tokens { lexer.tokenize( ) };
         Parser parser { tokens };
         std::vector ast { parser.parse(  ) };
-        // Solver type_solver;
-        // type_solver.solve( ast );
+        Solver type_solver;
+        type_solver.solve( ast );
         Compiler compiler { std::move( ast ) };
         Machine  machine;
+
         auto compiler_result { compiler.compile(  ) };
+
         machine.load( compiler_result.bytecode );
         machine.load_strings( compiler_result.string_pool );
+
         const auto first { machine.execute( ) };
     }
     catch ( const std::exception& err )

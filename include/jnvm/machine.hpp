@@ -83,6 +83,11 @@ namespace jnvm::machine
             load_natives(  );
         }
 
+        explicit Machine( const bool debug ) : m_dbg { debug }
+        {
+            load_natives(  );
+        }
+
         ///@brief Load a new program into the machine.
         ///@details Clears all registers and resets the program counter, and the call stack.
         void load( const std::vector< std::uint32_t > &_bytecode )
@@ -113,7 +118,12 @@ namespace jnvm::machine
             while ( m_pc < m_bytecode.size(  ) )
             {
                 execute_one(  );
-                if ( m_halted ) return m_registers[ 0 ];
+                if ( m_halted )
+                {
+                    if ( m_dbg ) std::println("Registers: {}", m_registers);
+
+                    return m_registers[ 0 ];
+                };
             }
 
             throw RuntimeError( "Program was aborted without a HLT instruction, please check your compiler." );
@@ -126,6 +136,7 @@ namespace jnvm::machine
         std::size_t m_pc { 0 };     /// Program counter
         std::size_t m_fp { 0 };     /// Frame pointer
         bool m_halted { false };
+        bool m_dbg { false };
 
         std::stack< StackFrame > m_call_stack;
         std::unordered_map< VMNativeID, VMNative > m_natives;

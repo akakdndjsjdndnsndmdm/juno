@@ -123,6 +123,14 @@ void Compiler::comp_statement( const Statement &stmt )
     {
         comp_var_decl_stmt( *v );
     }
+    else if ( const auto* c { dynamic_cast< const CompoundAssignment* >( &stmt ) } )
+    {
+        comp_compound_assign( *c );
+    }
+    else if ( const auto* a { dynamic_cast< const Assignment* >( &stmt ) } )
+    {
+        comp_assignment( *a );
+    }
     else if ( const auto* b { dynamic_cast< const BlockStmt* >( &stmt ) } )
     {
         comp_block_stmt( *b );
@@ -152,7 +160,7 @@ void Compiler::comp_var_decl_stmt( const VariableDeclaration &var_decl )
     std::uint8_t var_register;
     if ( var_decl.is_comptime(  ) )
     {
-        if ( auto reg { try_comptime( var_decl.get_value(  ).get(  ) ) } )
+        if ( const auto reg { try_comptime( var_decl.get_value(  ).get(  ) ) } )
         {
             var_register = *reg;
         }
@@ -167,6 +175,43 @@ void Compiler::comp_var_decl_stmt( const VariableDeclaration &var_decl )
 
     /* Bind the variable to the current scope */
     m_scopes.back(  ).declare( var_decl.get_name(  ), var_register );
+}
+
+void Compiler::comp_assignment( const Assignment &ass )
+{
+    const auto var_reg { find_variable( ass.get_name(  ) ) };
+
+    /*
+     *  Clean up only temporary values e.g x = 2;
+     *  And NOT identifier / variables e.g x = y;
+     */
+    const auto saved_reg { m_next_register };
+    const auto value_reg { comp_expression( ass.get_value(  ).get(  ) ) };
+    if ( value_reg != *var_reg )
+        emit( jnvm::inst::Instruction(jnvm::inst::Opcode::COPY, *var_reg, value_reg) );
+
+    /* If new registers were allocated now we clean up */
+    /* This will restore the register if we found a constant like 42 or a complex expr */
+    if ( value_reg >= saved_reg ) m_next_register = saved_reg;
+}
+
+void Compiler::comp_compound_assign( const CompoundAssignment &cass )
+{
+    const auto var_reg { find_variable( cass.get_name(  ) ) };
+
+    /*
+     *  Clean up only temporary values e.g x = 2;
+     *  And NOT identifier / variables e.g x = y;
+     */
+    const auto saved_reg { m_next_register };
+    const auto value_reg { comp_expression( cass.get_value(  ).get(  ) ) };
+
+    /* TODO: Implement other compound operators */
+    emit( jnvm::inst::Instruction(jnvm::inst::Opcode::ADD, *var_reg, value_reg, *var_reg) );
+
+    /* If new registers were allocated now we clean up */
+    /* This will restore the register if we found a constant like 42 or a complex expr */
+    if ( value_reg >= saved_reg ) m_next_register = saved_reg;
 }
 
 void Compiler::comp_block_stmt( const BlockStmt &block )
@@ -267,7 +312,7 @@ std::uint8_t Compiler::comp_string( const String &str )
 std::uint8_t Compiler::comp_identifier( const IdentifierLit &id ) const
 {
     /* Identifier = referring to a variable */
-    if ( auto n_reg { find_variable( id.get_value(  ) ) } )
+    if ( const auto n_reg { find_variable( id.get_value(  ) ) } )
         return *n_reg;
 
     throw RuntimeError( std::format( "Undefined variable '{}'", id.get_value(  ) ) );

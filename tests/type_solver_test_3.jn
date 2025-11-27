@@ -1,0 +1,5 @@
+// return a double from get
+fn get() -> double { return 1; }
+
+// expect a string instead
+let expected: string = get();

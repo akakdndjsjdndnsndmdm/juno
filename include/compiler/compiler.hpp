@@ -137,6 +137,10 @@ private:
     void comp_expr_stmt( const ExpressionStatement& stmt );
     ///@brief Compile a variable declaration statement.
     void comp_var_decl_stmt( const VariableDeclaration& var_decl );
+    ///@brief Compile an assignment statement.
+    void comp_assignment( const Assignment& ass );
+    ///@brief Compile a compound assignment statement.
+    void comp_compound_assign( const CompoundAssignment& cass );
     ///@brief Compile a block statement.
     void comp_block_stmt( const BlockStmt& block );
     ///@brief Compile a return statement.

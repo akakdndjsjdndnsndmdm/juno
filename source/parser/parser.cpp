@@ -151,6 +151,7 @@ std::unique_ptr< Statement > parser::Parser::parse_stmt( )
     {
         case token::SPECIAL:
         case token::LET: return parse_var_decl(  );
+        case token::IDENTIFIER: return parse_assignment(  );
         case token::LBRACE:
         case token::FN: return parse_prototype(  );
         case token::RETURN: return parse_return(  );
@@ -232,6 +233,43 @@ std::vector< Parameter > parser::Parser::parse_params( )
     }
 
     return params;
+}
+
+std::unique_ptr< Statement > parser::Parser::parse_assignment( )
+{
+    auto name { m_current.value };
+    /* If there is no equals symbol after identifier, parse as an expression statement */
+    if ( !check_ahead( token::EQUALS ) && !check_ahead( token::PLUS_EQ ) )
+        return parse_expr_stmt(  );
+
+    /* If there is a compound symbol e.g += instead of = then parse a compound assignment */
+    if ( check_ahead( token::PLUS_EQ ) )
+        return parse_comp_assignment(  );
+
+    /* Eat both the identifier and equals token */
+    eat(  );
+    eat(  );
+
+    auto value { parse_expr(  ) };
+
+    expect( token::SEMI, "Expected ';' after value in assignment." );
+    return std::make_unique< Assignment >( name, std::move( value ) );
+}
+
+std::unique_ptr< Statement > parser::Parser::parse_comp_assignment( )
+{
+    auto name { expect( token::IDENTIFIER, "Expected an identifier for lvalue of compound assignment." ) };
+
+    CompoundOperator op;
+    switch ( m_current.token_type )
+    {
+        case token::PLUS_EQ: op = CompoundOperator::ADD; eat(  ); break;
+        default: throw std::runtime_error("[juno::parser_error] Expected compound operator.");
+    }
+
+    auto value { parse_expr(  ) };
+    expect( token::SEMI, "Expected ';' after value in assignment." );
+    return std::make_unique< CompoundAssignment >( std::move( name ), std::move( value ), op );
 }
 
 std::unique_ptr< Statement > parser::Parser::parse_var_decl( )
@@ -327,6 +365,17 @@ void parser::Parser::eat()
 bool parser::Parser::check( const token::TokenType type ) const
 {
     return m_current.token_type == type;
+}
+
+bool parser::Parser::check_ahead( const token::TokenType type ) const
+{
+    if ( m_position + 1 >= m_tokens.size(  ) )
+        return false;
+
+    if ( m_tokens[ m_position + 1 ].token_type == type )
+        return true;
+
+    return false;
 }
 
 bool parser::Parser::match( token::TokenType type )

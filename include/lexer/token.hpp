@@ -32,6 +32,7 @@ namespace token
         PRINT,
         SEMI,
         ARROW,
+        PLUS_EQ, // +=
         FN,
         LET,
         END_OF_FILE

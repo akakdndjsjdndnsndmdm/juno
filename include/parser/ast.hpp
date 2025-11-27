@@ -135,6 +135,69 @@ struct Type
     std::optional< std::vector< std::unique_ptr< Type > > > generic_type_args;   /// Types inside generics e.g Something<A, B, C>
 };
 
+class Assignment final : public Statement
+{
+public:
+    explicit Assignment( std::string name, std::unique_ptr< Expression > value )
+        : m_name { std::move( name ) }, m_value { std::move( value ) }
+    { }
+
+    [[nodiscard]]
+    const std::unique_ptr< Expression > &get_value( ) const
+    {
+        return m_value;
+    }
+
+    [[nodiscard]]
+    const std::string &get_name( ) const
+    {
+        return m_name;
+    }
+private:
+    std::string m_name;
+    std::unique_ptr< Expression > m_value { nullptr };
+};
+
+enum CompoundOperator
+{
+    ADD
+};
+
+class CompoundAssignment final : public Statement
+{
+public:
+    explicit CompoundAssignment(
+        std::string name,
+        std::unique_ptr< Expression > value,
+        const CompoundOperator op
+    )
+        : m_name { std::move( name ) }, m_value { std::move( value ) }, m_op { op }
+    { }
+
+    [[nodiscard]]
+    const std::string &get_name( ) const
+    {
+        return m_name;
+    }
+
+    [[nodiscard]]
+    const std::unique_ptr< Expression > &get_value( ) const
+    {
+        return m_value;
+    }
+
+    [[nodiscard]]
+    CompoundOperator get_op( ) const
+    {
+        return m_op;
+    }
+
+  private:
+    std::string m_name;
+    std::unique_ptr< Expression > m_value { nullptr };
+    CompoundOperator m_op;
+};
+
 class VariableDeclaration final : public Statement
 {
 public:

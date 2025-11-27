@@ -43,6 +43,15 @@ namespace lexer
         { "@comptime", token::TokenType::SPECIAL },
     };
 
+    const std::unordered_map<
+        std::string_view,
+        token::TokenType
+    > token_compound_map
+    {
+        { "+=", token::TokenType::PLUS_EQ },
+        { "->", token::TokenType::ARROW }
+    };
+
     class Lexer
     {
     public:
@@ -63,5 +72,8 @@ namespace lexer
 
         ///@brief Look at the character ahead one position of the source code
         char *peek_ahead( );
+
+        ///@brief Will try to tokenize a compound token.
+        std::optional< token::Token > try_compound( char first, char second );
     };
 }

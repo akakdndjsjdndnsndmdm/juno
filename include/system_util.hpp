@@ -1,7 +1,3 @@
-//
-// Created by margo on 15/11/2025.
-//
-
 #pragma once
 #include <string>
 
@@ -15,6 +11,10 @@ namespace system_util
         return "win64";
 #elif defined(__unix__) || defined(__unix)
         return "unix";
+#elif defined(__ANDROID__)
+        return "android";
+#elif defined(__linux__)
+        return "linux";
 #else
         return "unknown";
 #endif
